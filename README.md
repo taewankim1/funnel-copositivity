@@ -1,0 +1,1 @@
+# funnel_synthesis_by_copositivity
