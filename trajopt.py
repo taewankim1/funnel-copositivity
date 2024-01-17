@@ -485,7 +485,7 @@ class trajopt:
                                                                                     flag_vc,
                                                                                     np.log10(self.c_vc),
                                                                                     flag_tr,
-                                                                                    self.c_tr,
+                                                                                    np.log10(self.c_tr),
                                                                                     flag_dyn, 
                                                                                     self.dyn_error))
             if flag_vc and flag_tr and flag_dyn :

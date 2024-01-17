@@ -58,6 +58,8 @@ class nl_funlopt_by_COP :
         D = cvx.Parameter((ir,iu))
         E = cvx.Parameter((ix,ip))
         G = cvx.Parameter((ir,iw))
+        Cv = cvx.Parameter((ix+iu,ix))
+        Dv = cvx.Parameter((ix+iu,iu))
 
         gamma_inv_squared = []
         beta_inv_squared = []
@@ -65,12 +67,17 @@ class nl_funlopt_by_COP :
             gamma_inv_squared.append(cvx.Parameter(pos=True))
             beta_inv_squared.append(cvx.Parameter(pos=True))
             
-        def stack_LMI(LMI11,LMI21,LMI31,LMI41,LMI22,LMI32,LMI42,LMI33,LMI43,LMI44) :
-            row1 = cvx.hstack((LMI11,LMI21.T,LMI31.T,LMI41.T))
-            row2 = cvx.hstack((LMI21,LMI22,LMI32.T,LMI42.T))
-            row3 = cvx.hstack((LMI31,LMI32,LMI33,LMI43.T))
-            row4 = cvx.hstack((LMI41,LMI42,LMI43,LMI44))
-            LMI = cvx.vstack((row1,row2,row3,row4))
+        def stack_LMI(LMI11,LMI21,LMI31,LMI41,LMI51,
+                            LMI22,LMI32,LMI42,LMI52,
+                                  LMI33,LMI43,LMI53,
+                                        LMI44,LMI54,
+                                              LMI55) :
+            row1 = cvx.hstack((LMI11,LMI21.T,LMI31.T,LMI41.T,LMI51.T))
+            row2 = cvx.hstack((LMI21,LMI22,LMI32.T,LMI42.T,LMI52.T))
+            row3 = cvx.hstack((LMI31,LMI32,LMI33,LMI43.T,LMI53.T))
+            row4 = cvx.hstack((LMI41,LMI42,LMI43,LMI44,LMI54.T))
+            row5 = cvx.hstack((LMI51,LMI52,LMI53,LMI54,LMI55))
+            LMI = cvx.vstack((row1,row2,row3,row4,row5))
             return LMI
 
         def get_N1(i,gamma_inv,beta_inv) :
@@ -97,38 +104,85 @@ class nl_funlopt_by_COP :
 
             Li = C@Qi + D@Yi
             Lj = C@Qj + D@Yj
+            
+            Lvi = Cv@Qi + Dv@Yi
+            Lvj = Cv@Qj + Dv@Yj
 
             LMI11 = Wij + Wji - 2*dQ
             LMI21 = (get_N2(i) + get_N2(j)) @ E.T
             LMI31 = F[i].T + F[j].T
             LMI41 = Li + Lj
+            LMI51 = Lvi + Lvj
             LMI22 = - (get_N2(i)+get_N2(j))
             LMI32 = np.zeros((iw,ip))
             LMI42 = np.zeros((ir,ip))
+            LMI52 = np.zeros((ix+iu,ip))
             LMI33 = -2*lambda_w * np.eye(iw)
             LMI43 = 2*G
+            LMI53 = np.zeros((ix+iu,iw))
             LMI44 = - (get_N1(i,gamma_inv,beta_inv) + get_N1(j,gamma_inv,beta_inv))
-            H_ij = - 1/2 * stack_LMI(LMI11,LMI21,LMI31,LMI41,LMI22,LMI32,LMI42,LMI33,LMI43,LMI44)
+            LMI54 = np.zeros((ix+iu,ir))
+            LMI55 = -np.eye(ix+iu)
+            H_ij = - 1/2 * stack_LMI(LMI11,LMI21,LMI31,LMI41,LMI51,
+                            LMI22,LMI32,LMI42,LMI52,
+                                  LMI33,LMI43,LMI53,
+                                        LMI44,LMI54,
+                                              LMI55)
             return H_ij
+
+        def copositive_to_LMI_1(constraints) :
+            for i in range(N) :
+                j = i+1
+                Qi = self.Sx@Qcvx[i]@self.Sx # i
+                Qj = self.Sx@Qcvx[j]@self.Sx # j
+                dQ = (Qj-Qi)/delT
+                gamma_inv = gamma_inv_squared[i]
+                beta_inv = beta_inv_squared[i]
+
+                H_ii = get_H(i,i,dQ,gamma_inv,beta_inv)
+                constraints.append(H_ii >> 0)
+
+                H_ij_ji = get_H(i,j,dQ,gamma_inv,beta_inv)
+                constraints.append(H_ij_ji >> 0)
+
+                H_jj = get_H(j,j,dQ,gamma_inv,beta_inv)
+                constraints.append(H_jj >> 0)
+            return
+        def copositive_to_LMI_2(constraints) :
+            X11 = []
+            X21 = []
+            X22 = []
+            iH = ix+ip+iw+ir+(ix+iu)
+            for i in range(N) :
+                # X11.append(cvx.Variable((iH,iH), PSD=True))
+                X21.append(cvx.Variable((iH,iH), PSD=True))
+                # X22.append(cvx.Variable((iH,iH), PSD=True))
+            for i in range(N) :
+                j = i+1
+                Qi = self.Sx@Qcvx[i]@self.Sx # i
+                Qj = self.Sx@Qcvx[j]@self.Sx # j
+                dQ = (Qj-Qi)/delT
+                gamma_inv = gamma_inv_squared[i]
+                beta_inv = beta_inv_squared[i]
+
+                H_ii = get_H(i,i,dQ,gamma_inv,beta_inv)
+                H_ij_ji = get_H(i,j,dQ,gamma_inv,beta_inv)
+                H_jj = get_H(j,j,dQ,gamma_inv,beta_inv)
+
+                LMI11 = H_ii #- X11[i]
+                LMI21 = H_ij_ji - X21[i]
+                LMI22 = H_jj #- X22[i]
+
+                row1 = cvx.hstack((LMI11,LMI21.T))
+                row2 = cvx.hstack((LMI21,LMI22))
+                LMI = cvx.vstack((row1,row2))
+                constraints.append(LMI >> 0)
+            return
 
         # Linear matrix equality
         constraints = []
-        for i in range(N) :
-            j = i+1
-            Qi = self.Sx@Qcvx[i]@self.Sx # i
-            Qj = self.Sx@Qcvx[j]@self.Sx # j
-            dQ = (Qj-Qi)/delT
-            gamma_inv = gamma_inv_squared[i]
-            beta_inv = beta_inv_squared[i]
-
-            H_ii = get_H(i,i,dQ,gamma_inv,beta_inv)
-            constraints.append(H_ii >> 0)
-
-            H_ij_ji = get_H(i,j,dQ,gamma_inv,beta_inv)
-            constraints.append(H_ij_ji >> 0)
-
-            H_jj = get_H(j,j,dQ,gamma_inv,beta_inv)
-            constraints.append(H_jj >> 0)
+        # copositive_to_LMI_1(constraints)
+        copositive_to_LMI_2(constraints)
 
         # constraints on Q
         for i in range(N+1) :
@@ -205,6 +259,8 @@ class nl_funlopt_by_COP :
         self.cvx_params['E'] = E
         self.cvx_params['F'] = F
         self.cvx_params['G'] = G
+        self.cvx_params['Cv'] = Cv
+        self.cvx_params['Dv'] = Dv
         self.cvx_params['gamma_inv_squared'] = gamma_inv_squared
         self.cvx_params['beta_inv_squared'] = beta_inv_squared
 
@@ -212,7 +268,7 @@ class nl_funlopt_by_COP :
         self.cvx_cost = {}
         self.cvx_cost['l'] = l
 
-    def cvxopt(self,gamma,beta,A,B,C,D,E,F,G) :
+    def cvxopt(self,gamma,beta,A,B,C,D,E,F,G,Cv,Dv) :
         ix,iu,N = self.ix,self.iu,self.N
         iq,ip,iw = self.iq,self.ip,self.iw
 
@@ -227,9 +283,11 @@ class nl_funlopt_by_COP :
         self.cvx_params['D'].value = D
         self.cvx_params['E'].value = E
         self.cvx_params['G'].value = G
+        self.cvx_params['Cv'].value = Cv
+        self.cvx_params['Dv'].value = Dv
 
         # self.prob.solve(solver=cvx.CLARABEL)
-        self.prob.solve(solver=cvx.MOSEK)
+        self.prob.solve(solver=cvx.MOSEK,ignore_dpp=True)
         print(self.prob.status)
         Qnew = []
         Ynew = []
@@ -246,7 +304,7 @@ class nl_funlopt_by_COP :
         # lam_beta_new = self.cvx_variables['lam_beta'].value
         return Qnew,Knew,Ynew,self.prob.status,self.cvx_cost['l'].value
 
-    def run(self,gamma,beta,A,B,C,D,E,F,G) :
+    def run(self,gamma,beta,A,B,C,D,E,F,G,Cv,Dv) :
         ix,iu,N = self.ix,self.iu,self.N
         iq,ip,iw = self.iq,self.ip,self.iw
         delT = self.delT
@@ -255,7 +313,7 @@ class nl_funlopt_by_COP :
         # assert len(A) == N+1
 
         # history = []
-        self.Qnew,self.Knew,self.Ynew,status,l = self.cvxopt(gamma,beta,A,B,C,D,E,F,G) 
+        self.Qnew,self.Knew,self.Ynew,status,l = self.cvxopt(gamma,beta,A,B,C,D,E,F,G,Cv,Dv) 
 
         self.Q = self.Qnew
         self.K = self.Knew
