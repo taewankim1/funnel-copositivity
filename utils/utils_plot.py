@@ -212,19 +212,17 @@ def plot_setting(x,xi=None,xf=None,Qi=None,Qf=None,plt=plt,flag_label=True,fS=15
     for label in ax.get_yticklabels():
         label.set_fontproperties(ticks_font)
 
-def plot_one_funnel(x,S,xi=None,xf=None,Qi=None,Qf=None,plt=plt,flag_label=True,fS=15) :
+def plot_one_funnel(x,S,xnom,Snom,xi=None,xf=None,Qi=None,Qf=None,plt=plt,flag_label=True,fS=15,alpha=0.5,color_funnel='tab:blue') :
     radius_S,angle_S = get_radius_angle(S)
+    radius_Snom,angle_Snom = get_radius_angle(Snom)
 
-    # plt.figure(idx_plot,figsize=(7,7))
     plt.plot(x[:,0], x[:,1],'--',color='black',alpha=0.8,linewidth=1.0)
     ax=plt.gca()
-    # for ce,H in zip(c_list,H_list) :
-    #     rx = 1/H[0,0]
-    #     ry = 1/H[1,1]
-    #     circle1 = Ellipse((ce[0],ce[1]),rx*2,ry*2,color='tab:red',alpha=0.5,fill=True)
-    #     ax.add_patch(circle1)
     for x_,radius,angle in zip(x,radius_S,angle_S) :
-        ell = Ellipse((x_[0],x_[1]),radius[0]*2,radius[1]*2,angle=np.rad2deg(angle),color='tab:blue',alpha=0.5,fill=True)
+        ell = Ellipse((x_[0],x_[1]),radius[0]*2,radius[1]*2,angle=np.rad2deg(angle),color=color_funnel,alpha=alpha,fill=True)
+        ax.add_patch(ell)
+    for x_,radius,angle in zip(xnom,radius_Snom,angle_Snom) :
+        ell = Ellipse((x_[0],x_[1]),radius[0]*2,radius[1]*2,angle=np.rad2deg(angle),color='darkblue',alpha=1.0,fill=False,linewidth=2.0)
         ax.add_patch(ell)
     if Qi is not None :
         radius_f,angle_f = get_radius_angle([Qi])
@@ -240,19 +238,15 @@ def plot_one_funnel(x,S,xi=None,xf=None,Qi=None,Qf=None,plt=plt,flag_label=True,
             ax.add_patch(ell)
     if flag_label == True :
         plt.plot(1e3,1e3,'--',color='black',label="nominal")
-        plt.plot(1e3,1e3,'o',markersize=15,color='tab:blue',label="invariant funnel $\mathcal{E}_{c}$") 
-        # plt.plot(1e3,1e3,'o',markersize=15,fillstyle='none',linewidth=4,color='tab:brown',label="approx funnel") 
-        # plt.plot(1e3,1e3,'o',markersize=15,fillstyle='none',linewidth=4,color='tab:brown',label="attractive funnel $\mathcal{E}$") 
-        # plt.plot(1e3,1e3,'o',markersize=15,color='tab:green',label="final") 
-        plt.plot(1e3,1e3,'o',markersize=15,alpha=1.0,color='tab:green',label="initial and final") 
+        plt.plot(1e3,1e3,'o',markersize=15,color='tab:blue',label="state funnel $\mathcal{E}_Q$") 
         plt.plot(1e3,1e3,'o',markersize=15,alpha=0.5,color='tab:red',label="obstacles") 
 
     plt.gca().set_aspect('equal', adjustable='box')
-    plt.axis([-1.0, 6.0, -1.0, 6.0])
-    plt.xlabel('$r_x$ (m)', fontsize = fS)
-    plt.ylabel('$r_y$ (m)', fontsize = fS)
+    plt.axis([-3, 6.0, -2.0, 9.2])
+    plt.xlabel('$x_1$ (m)', fontsize = fS)
+    plt.ylabel('$x_2$ (m)', fontsize = fS)
     if flag_label == True :
-        plt.legend(fontsize=fS)
+        plt.legend(fontsize=fS,loc='upper left')
     ticks_font = "Times New Roman"
     for label in ax.get_xticklabels():
         label.set_fontproperties(ticks_font)
@@ -300,7 +294,7 @@ def plot_two_funnel(x,Q,S,xi=None,xf=None,Qi=None,Qf=None,plt=plt,flag_label=Tru
         plt.plot(1e3,1e3,'o',markersize=15,alpha=0.5,color='tab:red',label="obstacles") 
 
     plt.gca().set_aspect('equal', adjustable='box')
-    plt.axis([-1.0, 6.0, -1.0, 6.0])
+    plt.axis([-1.0, 5.0, -1.0, 9.0])
     plt.xlabel('$r_x$ (m)', fontsize = fS)
     plt.ylabel('$r_y$ (m)', fontsize = fS)
     if flag_label == True :

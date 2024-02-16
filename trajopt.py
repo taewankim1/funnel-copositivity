@@ -174,6 +174,7 @@ class trajopt:
             Q.append(cvx.Parameter((ix,ix)))
             K.append(cvx.Parameter((iu,ix)))
         Q.append(cvx.Parameter((ix,ix)))
+        K.append(cvx.Parameter((iu,ix)))
 
         if self.type_discretization == "zoh" :
             B = []
@@ -191,7 +192,7 @@ class trajopt:
         refobs = []
         aQav = []
         aQaw = []
-        for i in range(N) :
+        for i in range(N+1) :
             refobs.append(cvx.Parameter((num_obs,4))) # a,b, sqrt(a.TQa)
             aQav.append(cvx.Parameter((1,1)))# sqrt(aKQK.Ta)
             aQaw.append(cvx.Parameter((1,1)))# sqrt(aKQK.Ta)
@@ -202,7 +203,7 @@ class trajopt:
         constraints.append(Sx@xcvx[-1] + sx == xf)
 
         # state and input contraints
-        for i in range(0,N) : 
+        for i in range(0,N+1) : 
             constraints += self.const.forward(Sx@xcvx[i]+sx,
                 Su@ucvx[i]+su,
                 Sx@xbar_unscaled[i]+sx,
@@ -320,7 +321,7 @@ class trajopt:
             b = dhdr@xbar[0:2] - hr
             return  a,b
 
-        for i in range(N) :
+        for i in range(N+1) :
             tmp = np.zeros((num_obs,4))
             for j in range(num_obs) :
                 a,b = get_obs_ab(self.const.c[j],self.const.H[j],self.x[i])
@@ -328,7 +329,7 @@ class trajopt:
             self.cvx_params['refobs'][i].value = tmp
         av = np.expand_dims(np.array([1,0]),1)
         aw = np.expand_dims(np.array([0,1]),1)
-        for i in range(N) :
+        for i in range(N+1) :
             self.cvx_params['aQav'][i].value =  np.sqrt(av.T@self.K[i]@self.Q[i]@self.K[i].T@av)
             self.cvx_params['aQaw'][i].value =  np.sqrt(aw.T@self.K[i]@self.Q[i]@self.K[i].T@aw)
 

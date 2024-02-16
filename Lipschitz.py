@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import scipy
 from scipy.integrate import odeint
 from scipy.integrate import solve_ivp
 import numpy as np
@@ -7,9 +8,6 @@ def print_np(x):
     print ("Type is %s" % (type(x)))
     print ("Shape is %s" % (x.shape,))
     # print ("Values are: \n%s" % (x))
-from utils.utils_alg import get_sample_eta_w
-
-
 
 class Lipschitz :
     def __init__(self,ix,iu,iq,ip,iw,N,num_sample=100,flag_uniform=True) :
@@ -38,6 +36,7 @@ class Lipschitz :
                     z = np.array([i,j])
                     zw = z / np.linalg.norm(z)
                     zw_sample.append(zw)
+            zu_sample = np.copy(zw_sample)
         else :
             for _ in range(self.num_sample) :
                 z = np.random.randn(ix)
@@ -48,17 +47,18 @@ class Lipschitz :
                 zw = z / np.linalg.norm(z)
                 zw_sample.append(zw)
         self.zs_sample = zs_sample
+        self.zu_sample = zu_sample
         self.zw_sample = zw_sample
 
 
-    def initialize(self,xbar,ubar,Qbar,Kbar,A,B,C,D,E,F,G,myModel)  :
+    def initialize(self,xbar,ubar,Qbar,Rbar,A,B,C,D,E,F,G,myModel)  :
         ix,iu,N = self.ix,self.iu,self.N
         ip,iq,iw = self.ip,self.iq,self.iw
 
         self.xbar = xbar
         self.ubar = ubar
         self.Qbar = Qbar
-        self.Kbar = Kbar
+        self.Rbar = Rbar
 
         self.A = A
         self.B = B 
@@ -70,33 +70,38 @@ class Lipschitz :
 
         self.myModel = myModel
 
-
-
     def update_lipschitz_norm(self,myModel) :
         ix,iu,N = self.ix,self.iu,self.N
         ip,iq,iw = self.ip,self.iq,self.iw
         A,B,C, = self.A,self.B,self.C
         D,E,F,G = self.D,self.E,self.F,self.G
-        Qbar,Kbar = self.Qbar,self.Kbar
+        Qbar,Rbar = self.Qbar,self.Rbar
         xbar,ubar = self.xbar,self.ubar
+        def get_sample_from_ellipsoid(Q,samples) :
+            sample = []
+            for s in samples:
+                e_s = scipy.linalg.sqrtm(Q)@s
+                sample.append(e_s)
+            sample = np.array(sample)
+            return sample
 
         gamma = np.zeros((N+1))
         for idx in range(N+1) :
-            eta_sample,w_sample = get_sample_eta_w(Qbar[idx],self.zs_sample,self.zw_sample) 
+            eta_sample = get_sample_from_ellipsoid(Qbar[idx],self.zs_sample)
+            xi_sample = get_sample_from_ellipsoid(Rbar[idx],self.zu_sample)
             num_sample = len(self.zs_sample)
             gamma_val = []
             for idx_s in range(num_sample) :
-                es,ws = eta_sample[idx_s],w_sample[idx_s] # samples on surface of ellipse
-                xii = Kbar[idx]@es
+                es,xii,ws = eta_sample[idx_s],xi_sample[idx_s],self.zw_sample[idx_s] # samples on surface of ellipse
 
                 xs_dot = myModel.forward_uncertain(xbar[idx]+es,ubar[idx]+xii,ws).squeeze()
                 eta_dot = xs_dot - myModel.forward(xbar[idx],ubar[idx]).squeeze()
 
-                LHS = eta_dot - (A[idx]+B[idx]@Kbar[idx])@es - F[idx]@ws
+                LHS = eta_dot - A[idx]@es - B[idx]@xii - F[idx]@ws
                 if LHS[2] > 1e-6 :
                     print("LHS[2] > 1e-6: is this possible?")
 
-                mu = (C+D@Kbar[idx])@es + G@ws
+                mu = C@es + D@xii + G@ws
 
                 gamma_val.append(np.linalg.norm(LHS)/np.linalg.norm(mu))
             gamma_val = np.array(gamma_val)

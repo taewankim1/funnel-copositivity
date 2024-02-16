@@ -1,4 +1,8 @@
-notebooks/
+notebooks/inter_sample_violation.ipynb
+notebooks/linear_case.ipynb
+notebooks/nonlinear_case_OCP.ipynb
+notebooks/.ipynb_checkpoints/
+notebooks/test.ipynb
 image/
 funlopt_by_COP.py
 funlopt_by_OCP.py

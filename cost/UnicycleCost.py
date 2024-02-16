@@ -19,8 +19,8 @@ class unicycle(OptimalcontrolCost):
         self.iu = 2
         self.N = N
 
-        self.S = 1e-4*np.identity(ix)
-        self.R = 1e-2*np.identity(iu)
+        self.S = 0*np.identity(ix)
+        self.R = 1*np.identity(iu)
 
     def bc_final(self,x_cvx,xf):
         h = []

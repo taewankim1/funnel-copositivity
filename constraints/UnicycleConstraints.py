@@ -29,8 +29,8 @@ class UnicycleConstraints(OptimalcontrolConstraints):
         self.vmax = 2.0
         self.vmin = 0.0
 
-        self.wmax = 2.0
-        self.wmin = -2.0
+        self.wmax = 1.5
+        self.wmin = -1.5
 
 
     def set_obstacle(self,c,H) :
