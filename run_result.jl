@@ -5,6 +5,15 @@ include("./funlopt/funl_utils.jl")
 include("./funlopt/funl_constraint.jl")
 include("./trajopt/scaling.jl")
 
+# Set default plot settings for academic paper
+default(fontfamily="Times",  # Use Times New Roman font
+        titlefont=14,        # Title font size
+        guidefont=12,        # Label (guide) font size
+        tickfont=10,         # Tick font size
+        legendfont=12,       # Legend font size
+        grid=true)          # Remove grid lines for a cleaner look
+
+
 # load nominal trajectory
 using JLD2, FileIO
 filename = "./data/traj_result" 
@@ -188,8 +197,10 @@ p2 = Plots.plot(; size=(500,500))
 plot!(xnom[1,:],xnom[2,:],aspect_ratio=:equal,c=:deepskyblue3,linestyle=:dash,linewidth=1.5,label=nothing)
 for idx in 1:N+1
     label = nothing
-    plot_ellipse(p2,Qnom[:,:,idx],xnom[:,idx],"red",linewidth=1,label=label,fill=false)
-    plot_ellipse(p2,Qnom_[:,:,idx],xnom[:,idx],"deepskyblue3",linewidth=1,label=label,fill=false)
+    if idx == 1
+        label = "funnel"
+    end
+    plot_ellipse(p2,Qnom_[:,:,idx],xnom[:,idx],"deepskyblue3",linewidth=1.5,label=label,fill=true)
 end
 for (idx,(ce, H)) in enumerate(zip(c_list, H_list))
     label = nothing
