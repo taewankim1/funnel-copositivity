@@ -62,40 +62,6 @@ struct FunnelSynthesis
     end
 end
 
-function get_block_LMI(fs,Qi,Qj,Yi,Yj,Z,bi,bj,xi,ui,xj,uj)
-    if typeof(fs.funl_dynamics) == LinearFOH || typeof(fs.funl_dynamics) == LinearSOH
-        Ai,Bi = diff(fs.dynamics,xi,ui)
-        Aj,Bj = diff(fs.dynamics,xj,uj)
-        Wij = Ai*Qj + Qj'*Ai' + Bi*Yj + Yj'*Bi' + 0.5*fs.funl_dynamics.alpha*(Qj+Qj') - Z
-        Wji = Aj*Qi + Qi'*Aj' + Bj*Yi + Yi'*Bj' + 0.5*fs.funl_dynamics.alpha*(Qi+Qi') - Z
-    elseif typeof(fs.funl_dynamics) == LinearDLMI
-        Wij = - Z
-        Wji = - Z
-    end
-    LMI11 = Wij + Wji
-    if fs.flag_type == "Linear"
-        return LMI11
-    end
-    θ = fs.solution.θ
-    iμ = fs.dynamics.iμ
-    iψ = fs.dynamics.iψ
-    N11 = diagm(θ ./ ( fs.dynamics.β .* fs.dynamics.β))
-    N22i =  bi * θ .* Matrix{Float64}(I, iψ, iψ)
-    N22j =  bj * θ .* Matrix{Float64}(I, iψ, iψ)
-    LMI21 = (N22i+N22j) * fs.dynamics.G'
-    LMI22 = -(N22i+N22j)
-    LMI31i = fs.dynamics.Cμ * Qi + fs.dynamics.Dμu * Yi
-    LMI31j = fs.dynamics.Cμ * Qj + fs.dynamics.Dμu * Yj
-    LMI31 = LMI31i + LMI31j
-    LMI32 = 2*zeros(iμ,iψ)
-    LMI33 = -2*N11
-    LMI = 0.5 * [LMI11 LMI21' LMI31';
-        LMI21 LMI22 LMI32';
-        LMI31 LMI32 LMI33
-    ]
-    return LMI
-end
-
 function stack_LMI(LMI11,LMI21,LMI31,LMI41,
                     LMI22,LMI32,LMI42,
                             LMI33,LMI43,
@@ -108,30 +74,13 @@ function stack_LMI(LMI11,LMI21,LMI31,LMI41,
     return LMI
 end
 
+# function boundary_initial!(fs,model::Model,Q1)
+#     @constraint(model, Q1 >= fs.solution.Qi, PSDCone())
+# end
 
-function get_b_LMI(fs,Q,Y,b)
-    tmp12 = fs.dynamics.Cv*Q + fs.dynamics.Dvu*Y
-    Bound_b = [b * I(fs.dynamics.iv) tmp12;
-        tmp12' Q
-    ]
-    return Bound_b
-end
-
-function block_LMIs!(fs,model::Model,Qi,Qj,Yi,Yj,Z,bi,bj,xi,ui,xj,uj)
-    LMI = get_block_LMI(fs,Qi,Qj,Yi,Yj,Z,bi,bj,xi,ui,xj,uj)
-    @constraint(model, LMI <= 0, PSDCone())
-    return LMI
-end
-
-function boundary_initial!(fs,model::Model,Q1)
-    @constraint(model, Q1 >= fs.solution.Qi, PSDCone())
-end
-
-function boundary_final!(fs,model::Model,Qend)
-    # diag([0.2**2,0.2**2,np.deg2rad(10)**2])
-    Qf = diagm([0.2^2,0.2^2,deg2rad(10^2)])
-    @constraint(model, Qend <= Qf, PSDCone())
-end
+# function boundary_final!(fs,model::Model,Qend)
+#     @constraint(model, Qend <= Qf, PSDCone())
+# end
 
 function state_input_constraints!(fs,model::Model,Qi,Yi,xnom,unom,idx)
     N_constraint = size(fs.funl_constraint,1)
@@ -146,15 +95,20 @@ function sdpopt!(fs::FunnelSynthesis,xnom::Matrix,unom::Matrix,tnom::Vector,
     N = fs.N
     ix = fs.dynamics.ix
     iu = fs.dynamics.iu
+    iw = fs.dynamics.iw
     iq = fs.dynamics.iq
     iphi = fs.dynamics.iphi
     ir = fs.dynamics.ir
     ip = fs.dynamics.ip
+    iH = ix+ip+iw+ir
+    idelta = fs.dynamics.idelta
 
     Sx = fs.scaling.Sx
     iSx = fs.scaling.iSx
     Su = fs.scaling.Su
     iSu = fs.scaling.iSu
+
+    Slam = fs.scaling.Slam
 
     lambda_w = fs.solution.lambda_w
 
@@ -184,6 +138,16 @@ function sdpopt!(fs::FunnelSynthesis,xnom::Matrix,unom::Matrix,tnom::Vector,
         push!(Ycvx, @variable(model, [1:iu, 1:ix]))
     end
     @variable(model, lamcvx[1:2,1:N+1] .>= 0)
+    if fs.flag_copositivity_type == 2
+        X11 = []
+        X21 = []
+        X22 = []
+        for i in 1:N
+            push!(X11, @variable(model, [1:iH, 1:iH], PSD))
+            push!(X21, @variable(model, [1:iH, 1:iH], PSD))
+            push!(X22, @variable(model, [1:iH, 1:iH], PSD))
+        end
+    end
 
     # alias gamma and beta 
     beta = fs.solution.beta
@@ -195,20 +159,16 @@ function sdpopt!(fs::FunnelSynthesis,xnom::Matrix,unom::Matrix,tnom::Vector,
         @constraint(model, Sx*Qcvx[i]*Sx >= very_small .* Matrix(1.0I,ix,ix), PSDCone())
     end
 
-    # # boundary condition
-    # boundary_initial!(fs,model,Sx*Qcvx[1]*Sx)
-    # boundary_final!(fs,model,Sx*Qcvx[end]*Sx)
-
     function get_N1(lam::Vector)::Matrix
-        N11 = [lam[1]*1.0I(ix+iu+iw) zeros(ix+iu+iw,iq)]
-        N22 = [zeros(iq,ix+iu+iw) lam[2]*1.0I(iq)]
+        N11 = [lam[1]*1.0I(ir-iq) zeros(ir-iq,iq)]
+        N22 = [zeros(iq,ir-iq) lam[2]*1.0I(iq)]
         N1 = [N11;N22]
         return N1
     end
 
     function get_N2(lam::Vector,gamma_sq::Float64,beta_sq::Float64)::Matrix
-        N11 = [lam[1]*beta_sq*1.0I(ix) zeros(ix,iphi)]
-        N22 = [zeros(iphi,ix) lam[2]*gamma_sq*1.0I(iphi)]
+        N11 = [lam[1]*beta_sq*1.0I(idelta) zeros(idelta,iphi)]
+        N22 = [zeros(iphi,idelta) lam[2]*gamma_sq*1.0I(iphi)]
         N2 = [N11;N22]
         return N2
     end
@@ -240,32 +200,37 @@ function sdpopt!(fs::FunnelSynthesis,xnom::Matrix,unom::Matrix,tnom::Vector,
     for i in 1:N+1
         Qi = Sx*Qcvx[i]*Sx
         Yi = Su*Ycvx[i]*Sx
-        lami = lamcvx[:,i]
+        lami = Slam * lamcvx[:,i]
         xi = xnom[:,i]
         ui = unom[:,i]
         Ai,Bi,Fi = diff_ABF(fs.dynamics,xi,ui)
         if i <= N
             Qj = Sx*Qcvx[i+1]*Sx
             Yj = Su*Ycvx[i+1]*Sx
-            lamj = lamcvx[:,i+1]
+            lamj = Slam * lamcvx[:,i+1]
             xj = xnom[:,i+1]
             uj = unom[:,i+1]
             Aj,Bj,Fj = diff_ABF(fs.dynamics,xj,uj)
             delt = tnom[i+1] - tnom[i]
             dQ = (Qj-Qi) / delt
+            gamma_sq = fs.solution.gamma[i]^2
+            beta_sq = fs.solution.beta[i]^2
+
+            H_ii = get_H(Qi,Qi,Yi,Yi,lami,lami,Ai,Ai,Bi,Bi,Fi,Fi,dQ,gamma_sq,beta_sq)
+            H_ij = get_H(Qi,Qj,Yi,Yj,lami,lamj,Ai,Aj,Bi,Bj,Fi,Fj,dQ,gamma_sq,beta_sq)
+            H_jj = get_H(Qj,Qj,Yj,Yj,lamj,lamj,Aj,Aj,Bj,Bj,Fj,Fj,dQ,gamma_sq,beta_sq)
             if fs.flag_copositivity_type == 1
-                gamma_sq = fs.solution.gamma[i]^2
-                beta_sq = fs.solution.beta[i]^2
-
-                H_ii = get_H(Qi,Qi,Yi,Yi,lami,lami,Ai,Ai,Bi,Bi,Fi,Fi,dQ,gamma_sq,beta_sq)
-                H_ij = get_H(Qi,Qj,Yi,Yj,lami,lamj,Ai,Aj,Bi,Bj,Fi,Fj,dQ,gamma_sq,beta_sq)
-                H_jj = get_H(Qj,Qj,Yj,Yj,lamj,lamj,Aj,Aj,Bj,Bj,Fj,Fj,dQ,gamma_sq,beta_sq)
-
                 @constraint(model,H_ii >= 0, PSDCone())
                 @constraint(model,H_ij >= 0, PSDCone())
                 @constraint(model,H_jj >= 0, PSDCone())
             elseif fs.flag_copositivity_type == 2
-                error("Copositivity type 2 not implemented yet")
+                LMI11 = H_ii - X11[i]
+                LMI21 = H_ij - X21[i]
+                LMI22 = H_jj - X22[i]
+
+                LMI = [LMI11 LMI21';LMI21 LMI22]
+
+                @constraint(model,LMI >= 0, PSDCone())
             else
                 error("Copositivity type must be 1 or 2")
             end
@@ -280,22 +245,18 @@ function sdpopt!(fs::FunnelSynthesis,xnom::Matrix,unom::Matrix,tnom::Vector,
     end
 
     # cost
-    # @variable(model, log_det_Q)
-    # @constraint(model, [log_det_Q; 1; vec(Sx*Qcvx[1]*Sx)] in MOI.LogDetConeSquare(ix))
     cost_funl = - tr(Sx*Qcvx[1]*Sx) + tr(Sx*Qcvx[end]*Sx)
-    # cost_funl = tr(Sx*Qcvx[end]*Sx)
-    # cost_funl = - log_det_Q # not stable
-    # cost_funl = - tr(Sx*Qcvx[1]*Sx)
 
     @objective(model,Min,cost_funl)
     optimize!(model)
+    solve_time = MOI.get(model, MOI.SolveTimeSec())
 
     for i in 1:N+1
         fs.solution.Q[:,:,i] .= Sx*value.(Qcvx[i])*Sx
         fs.solution.Y[:,:,i] .= Su*value.(Ycvx[i])*Sx
+        fs.solution.lam[:,i] = Slam * value.(lamcvx[:,i])
     end
-    fs.solution.lam = value.(lamcvx)
-    return value(cost_funl)
+    return value(cost_funl),solve_time
 end
 
 function run!(fs::FunnelSynthesis,
@@ -311,8 +272,8 @@ function run!(fs::FunnelSynthesis,
     fs.solution.beta .= beta
 
     # solve subproblem
-    c_all = sdpopt!(fs,xnom,unom,tnom,Qmax,Rmax,solver)
-    return c_all
+    c_all,solve_time = sdpopt!(fs,xnom,unom,tnom,Qmax,Rmax,solver)
+    return c_all,solve_time
 
     # # propagate
     # (

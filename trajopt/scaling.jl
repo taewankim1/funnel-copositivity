@@ -6,20 +6,20 @@ mutable struct Scaling
     Su::Matrix{Float64}
     iSu::Matrix{Float64}
     su::Vector{Float64}
+    Slam::Matrix{Float64}
     S_sigma::Float64
-    min_dt::Float64
-    max_dt::Float64
-    s_ctcs::Float64
     
     # Define the inner constructor
-    function Scaling(xmin, xmax, umin, umax, tmax, min_dt, max_dt)
-        Sx, iSx, sx, Su, iSu, su, S_sigma = compute_scaling(xmin, xmax, umin, umax, tmax)
-        new(Sx, iSx, sx, Su, iSu, su, S_sigma,min_dt,max_dt)
+    function Scaling(xmin, xmax, umin, umax, slam1, slam2)
+        Sx, iSx, sx, Su, iSu, su = compute_scaling(xmin, xmax, umin, umax)
+        Slam = diagm([slam1,slam2])
+        S_sigma = 1.0
+        new(Sx, iSx, sx, Su, iSu, su, Slam,S_sigma)
     end
 end
 
 # Define the compute_scaling function
-function compute_scaling(xmin, xmax, umin, umax, tmax)
+function compute_scaling(xmin, xmax, umin, umax)
     tol_zero = 1e-10
 
     x_intrvl = [0, 1]
@@ -41,6 +41,5 @@ function compute_scaling(xmin, xmax, umin, umax, tmax)
     su = umin - u_intrvl[1] * diag(Su)
     @assert size(su, 2) == 1
 
-    S_sigma = tmax
-    return Sx, iSx, sx, Su, iSu, su, S_sigma
+    return Sx, iSx, sx, Su, iSu, su
 end

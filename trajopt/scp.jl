@@ -107,11 +107,11 @@ function uniform_fixed!(ptr::SCP,model::Model)
     S_sigma = ptr.scaling.S_sigma 
     dt = [ptr.tf/N/S_sigma for i in 1:N]
     i = 1
-    min_dt = ptr.scaling.min_dt
-    max_dt = ptr.scaling.max_dt
-    @constraint(model,S_sigma*dt[i] >= 0)
-    @constraint(model,S_sigma*dt[i] >= min_dt)
-    @constraint(model,S_sigma*dt[i] <= max_dt)
+    # min_dt = ptr.scaling.min_dt
+    # max_dt = ptr.scaling.max_dt
+    # @constraint(model,S_sigma*dt[i] >= 0)
+    # @constraint(model,S_sigma*dt[i] >= min_dt)
+    # @constraint(model,S_sigma*dt[i] <= max_dt)
     return dt
 end
 
@@ -278,7 +278,7 @@ function cvxopt(ptr::PTR,solver::Any,solver_env::Any)
     end
 
     # # Hard coding (intermediate waypoint)
-    # @constraint(model, (Sx*xcvx[:,11]+sx)[1:2] == [4;8])
+    @constraint(model, (Sx*xcvx[:,2]+sx)[1:2] == [4;8])
 
     # Dynamics
     for i in 1:N

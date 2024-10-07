@@ -8,6 +8,7 @@ mutable struct Unicycle <: Dynamics
     iphi::Int
     ir::Int
     ip::Int
+    idelta::Int
     Co::Array{Float64,2}
     Do::Array{Float64,2}
     Eo::Array{Float64,2}
@@ -28,6 +29,7 @@ mutable struct Unicycle <: Dynamics
         iphi = 2
         ir = ix + iu + iw + iq
         ip = ix + iphi
+        idelta = 2
 
         Co = [0 0 1; 0 0 0; 0 0 0]
         Do = [0 0; 1 0; 0 0]
@@ -35,8 +37,8 @@ mutable struct Unicycle <: Dynamics
         Go = [0 0; 0 0; 1 0]
 
         c1 = 0.01
-        c2 = 0.01
-        new(ix, iu, iw, iq, iphi, ir, ip, Co, Do, Eo, Go, c1, c2)
+        c2 = 0.03
+        new(ix, iu, iw, iq, iphi, ir, ip, idelta, Co, Do, Eo, Go, c1, c2)
     end
 end
 
