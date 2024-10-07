@@ -6,12 +6,13 @@ include("./funlopt/funl_constraint.jl")
 include("./trajopt/scaling.jl")
 
 # Set default plot settings for academic paper
-default(fontfamily="Times",  # Use Times New Roman font
-        titlefont=14,        # Title font size
-        guidefont=12,        # Label (guide) font size
-        tickfont=10,         # Tick font size
-        legendfont=12,       # Legend font size
-        grid=true)          # Remove grid lines for a cleaner look
+default(
+    guidefont = font(12, "Times"),      # Axis label font
+    legendfont = font(12, "Times"),     # Legend font
+    titlefont = font(14, "Times"),      # Title font
+    tickfont = font(10, "sans-serif"),  # Tick font
+    grid = true                         # Enable grid lines
+)
 
 
 # load nominal trajectory
