@@ -36,8 +36,8 @@ mutable struct Unicycle <: Dynamics
         Eo = [1 0; 0 1; 0 0]
         Go = [0 0; 0 0; 1 0]
 
-        c1 = 0.01
-        c2 = 0.03
+        c1 = 0.03
+        c2 = 0.05
         new(ix, iu, iw, iq, iphi, ir, ip, idelta, Co, Do, Eo, Go, c1, c2)
     end
 end

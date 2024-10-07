@@ -165,7 +165,8 @@ using JuMP, Random
 function Lipschitz_estimation_around_traj(N::Int,num_sample::Int,
     xnom::Matrix{Float64},unom::Matrix{Float64},
     dynamics::Dynamics,Qnode::Array{Float64,3},Rnode::Array{Float64,3})
-    gamma_sample = zeros(num_sample,N+1)
+    iphi = dynamics.iphi
+    gamma_sample = zeros(num_sample,iphi,N+1)
 
     for idx in 1:N+1
         for j in 1:num_sample
@@ -206,10 +207,20 @@ function Lipschitz_estimation_around_traj(N::Int,num_sample::Int,
             @objective(model,Min,dot(vec(Delta),vec(Delta)))
             optimize!(model)
 
-            gamma_sample[j,idx] = opnorm(value.(Delta),2)
+            for ip in 1:iphi
+                gamma_sample[j,ip,idx] = norm(value.(Delta[ip,:]))
+            end
         end
     end
-    return maximum(gamma_sample,dims=1)[:]
+    result = []
+    for idx in 1:N+1
+        gamma_idx = zeros(iphi)
+        for ip in 1:iphi
+            gamma_idx[ip] = maximum(gamma_sample[:,ip,idx])
+        end
+        push!(result,diagm(gamma_idx))
+    end
+    return result
 end
 
 function Lipschitz_estimation_around_traj_with_feedback(N::Int,num_sample::Int,

@@ -17,8 +17,8 @@ mutable struct FunnelSolution
     Y::Array{Float64,3}
     lam::Array{Float64,2}
 
-    gamma::Vector{Float64}
-    beta::Vector{Float64}
+    gamma::Vector{Any}
+    beta::Vector{Any}
 
     Qi::Matrix{Float64}
     Qf::Matrix{Float64}
@@ -166,7 +166,7 @@ function sdpopt!(fs::FunnelSynthesis,xnom::Matrix,unom::Matrix,tnom::Vector,
         return N1
     end
 
-    function get_N2(lam::Vector,gamma_sq::Float64,beta_sq::Float64)::Matrix
+    function get_N2(lam::Vector,gamma_sq::Any,beta_sq::Float64)::Matrix
         N11 = [lam[1]*beta_sq*1.0I(idelta) zeros(idelta,iphi)]
         N22 = [zeros(iphi,idelta) lam[2]*gamma_sq*1.0I(iphi)]
         N2 = [N11;N22]
@@ -268,8 +268,8 @@ function run!(fs::FunnelSynthesis,
     # fs.solution.Qi .= Qi 
     # fs.solution.Qf .= Qf
 
-    fs.solution.gamma .= gamma
-    fs.solution.beta .= beta
+    fs.solution.gamma = gamma
+    fs.solution.beta = beta
 
     # solve subproblem
     c_all,solve_time = sdpopt!(fs,xnom,unom,tnom,Qmax,Rmax,solver)
