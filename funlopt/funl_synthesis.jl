@@ -166,7 +166,7 @@ function sdpopt!(fs::FunnelSynthesis,xnom::Matrix,unom::Matrix,tnom::Vector,
         return N1
     end
 
-    function get_N2(lam::Vector,gamma_sq::Any,beta_sq::Float64)::Matrix
+    function get_N2(lam::Vector,gamma_sq::Any,beta_sq::Any)::Matrix
         N11 = [lam[1]*beta_sq*1.0I(idelta) zeros(idelta,iphi)]
         N22 = [zeros(iphi,idelta) lam[2]*gamma_sq*1.0I(iphi)]
         N2 = [N11;N22]

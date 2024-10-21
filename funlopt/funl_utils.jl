@@ -4,6 +4,26 @@ include("../trajopt/discretize.jl")
 include("funl_dynamics.jl")
 using LinearAlgebra
 
+function project_onto_input(Q,Y) 
+    R = zeros(iu,iu,size(Q,3))
+    for i in 1:size(Q,3)
+        K = Y[:,:,i] * inv(Q[:,:,i])
+        # push!(R,)
+        R[:,:,i] .= K*Q[:,:,i]*K'
+    end
+    projected_input_funl = []
+    for j in 1:iu
+        a = zeros(iu)
+        a[j] = 1
+        each_funl = []
+        for i in 1:size(Q,3)
+            push!(each_funl,sqrt(a'*R[:,:,i]*a))
+        end
+        push!(projected_input_funl,each_funl)
+    end
+    return projected_input_funl,R
+end
+
 function get_radius_angle_Ellipse2D(Q_list)
     radius_list = []
     angle_list = []
@@ -27,7 +47,7 @@ function get_radius_angle_Ellipse2D(Q_list)
     return radius_list, angle_list
 end
 
-function get_u_interp(t::Float64)
+function get_u_interp(t::Float64,u_fit)
     ans = zeros(iu)
     for i in 1:iu
         ans[i] = u_fit[i](t)
@@ -288,7 +308,7 @@ function propagate_from_funnel_entry_uncertain_dynamics(x0::Vector,dynamics::Dyn
         # up = p[2]
         # dt = p[3]
 
-        unom_ = get_u_interp(t)
+        unom_ = get_u_interp(t,u_fit)
         Q_ = get_ABF_interp(t,Q_fit,ix,ix)
         Y_ = get_ABF_interp(t,Y_fit,iu,ix)
 
@@ -336,7 +356,7 @@ function propagate_from_funnel_entry_uncertain_dynamics(x0::Vector,dynamics::Dyn
             x_ = xode[:,idx]
 
             xnom_ = xnomode[:,idx]
-            unom_ = get_u_interp(t_)
+            unom_ = get_u_interp(t_,u_fit)
 
             Q_ = get_ABF_interp(t_,Q_fit,ix,ix)
             Y_ = get_ABF_interp(t_,Y_fit,iu,ix)

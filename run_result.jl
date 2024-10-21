@@ -93,6 +93,7 @@ end
 
 N_sampling = 20
 beta = []
+beta_vec = []
 for i = 1:N
     tspan = (0,tnom[i+1]-tnom[i])
     saveat = range(0, stop=tnom[i+1]-tnom[i], length=N_sampling)
@@ -100,39 +101,37 @@ for i = 1:N
     sol = solve(prob, Tsit5(), reltol=1e-9, abstol=1e-9;verbose=false);
     @assert(isapprox(sol.u[end],xnom[:,i+1];atol=0.0001))
     delta = []
+    delta_vec = zeros(N_sampling,6)
     for idx_sample = 1:N_sampling
         t_eval = sol.t[idx_sample] + tnom[i]
         x_eval = sol.u[idx_sample]
-        u_eval = get_u_interp(t_eval)
+        u_eval = get_u_interp(t_eval,u_fit)
         A_eval,B_eval,F_eval = diff_ABF(dynamics,x_eval,u_eval)
         eA = get_ABF_interp(t_eval,A_fit,ix,ix) .- A_eval
         eB = get_ABF_interp(t_eval,B_fit,ix,iu) .- B_eval
         eF = get_ABF_interp(t_eval,F_fit,ix,iw) .- F_eval
+
         delta_ = [eA eB eF]
         push!(delta,opnorm(delta_,2))
+        delta_vec[idx_sample,:] .= [abs(eA[1,3]), abs(eA[2,3]), abs(eB[1,1]), abs(eB[2,1]), abs(eF[1,1]), abs(eF[2,1])]
     end
-    push!(beta,maximum(delta))
+    # push!(beta,maximum(delta))
+    push!(beta,diagm(maximum(delta_vec,dims=1)[1,:]))
 end
 
-# dynamics.C = [1.0I(ix);zeros(iu,ix);zeros(iw,ix);dynamics.Co]
-# dynamics.D = [zeros(ix,iu);1.0I(iu);zeros(iw,iu);dynamics.Do]
-# dynamics.E = [1.0I(ix) dynamics.Eo]
-# dynamics.G = [zeros(ix,iw);zeros(iu,iw);1.0I(iw);dynamics.Go];
-# dynamics.idelta = 3
-
-C1 = [0 0 1;0 0 0]
-D1 = [1 0;0 0]
-G1 = [0 0;0 0]
-E1 = [1 0;0 1;0 0]
+C1 = [0 0 1;0 0 1;0 0 0;0 0 0;0 0 0;0 0 0]
+D1 = [0 0;0 0;1 0;1 0;0 0;0 0]
+G1 = [0 0;0 0;0 0;0 0;1 0;1 0]
+E1 = [1 0 1 0 1 0;0 1 0 1 0 1;0 0 0 0 0 0]
 
 dynamics.C = [C1;dynamics.Co]
 dynamics.D = [D1;dynamics.Do]
 dynamics.E = [E1 dynamics.Eo]
 dynamics.G = [G1;dynamics.Go];
 
-dynamics.ir = 2 + dynamics.iq
-dynamics.ip = 2 + dynamics.iphi
-dynamics.idelta = 2
+dynamics.ir = 6 + dynamics.iq
+dynamics.idelta = 6
+dynamics.ip = dynamics.idelta + dynamics.iphi
 
 xmin = [0;0;0];
 xmax = [1;1;pi];
