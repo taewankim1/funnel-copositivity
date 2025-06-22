@@ -14,10 +14,6 @@ end
 #     end
 # end
 
-# function get_cost(dynamics::ThreeDOFManipulatorDynamics,x::Vector,u::Vector,idx::Int,N::Int)
-#     return dot(u,u)
-# end
-
-function get_cost(dynamics::QuadrotorDynamics,x::Vector,u::Vector,idx::Int,N::Int)
-    return dot(u,u)
+function get_cost(dynamics::Rocket,x::Vector,u::Vector,idx::Int,N::Int)
+    return 0
 end

@@ -47,7 +47,7 @@ function impose!(constraint::Obstacle,model::Model,x::Vector,u::Vector,xbar::Vec
 end
 
 struct PDG <: Constraint
-    m_dry::Float64
+    # m_dry::Float64
 
     vmax::Float64
     wmax::Float64
@@ -60,19 +60,18 @@ struct PDG <: Constraint
     tau_max::Float64
     delta_max::Float64
     function PDG()
-        m_dry = 750
-
-        vmax = 90
-        wmax = deg2rad(5)
+        # m_dry = 750
+        vmax = 2
+        wmax = deg2rad(20)
         glide_slope_max = deg2rad(20) 
         theta_max = deg2rad(90)
 
-        Fmin = 600
-        Fmax = 3000
-        tau_max = 50
+        Fmin = 1.5
+        Fmax = 5.0
+        tau_max = 0.00
         delta_max = deg2rad(20)
 
-        new(m_dry,vmax,wmax,glide_slope_max,theta_max,Fmin,Fmax,tau_max,delta_max)
+        new(vmax,wmax,glide_slope_max,theta_max,Fmin,Fmax,tau_max,delta_max)
     end
 end
 
@@ -80,23 +79,24 @@ function impose!(pdg::PDG,model::Model,x::Vector,u::Vector,xbar::Vector=[nothing
     # m rx ry rz vx vy vz roll pitch yaw wx wy wz
     # 1  2  3  4  5  6  7 . 8 . 9    10  11 12 13
     # mass
-    m = x[1]
-    @constraint(model,pdg.m_dry <= m)
+
+    # m = x[1]
+    # @constraint(model,pdg.m_dry <= m)
 
     # maximum velocity
-    v = x[5:7]
+    v = x[4:6]
     @constraint(model,[pdg.vmax;v] in SecondOrderCone())
 
     # maximum angular velocity
-    w = x[11:13]
+    w = x[10:12]
     @constraint(model,[pdg.wmax;w] in SecondOrderCone())
 
     # glide slope angle
-    @constraint(model, [x[4]/tan(pdg.gamma_s); x[2:3]] in SecondOrderCone())
+    @constraint(model, [x[3]/tan(pdg.gamma_s); x[1:2]] in SecondOrderCone())
 
     # maximum tilt
-    roll = x[8]
-    pitch = x[9]
+    roll = x[7]
+    pitch = x[8]
     @constraint(model, [roll,-roll] .<= [pdg.theta_max;pdg.theta_max])
     @constraint(model, [pitch,-pitch] .<= [pdg.theta_max;pdg.theta_max])
 
@@ -123,9 +123,10 @@ end
 function final_condition!(dynamics::Dynamics,model::Model,xN::Vector,xf::Vector;uN::Vector)
     @constraint(model,xN == xf)
 end
-# function final_condition!(dynamics::Rocket,model::Model,xN::Vector,xf::Vector;uN::Vector)
-#     @constraint(model,xN[2:dynamics.ix] == xf[2:dynamics.ix])
-# end
+function final_condition!(dynamics::Rocket,model::Model,xN::Vector,xf::Vector;uN::Vector)
+    @constraint(model,xN[2:dynamics.ix] == xf[2:dynamics.ix])
+end
+
 
 # struct ThreeDOFManipulatorConstraint <: Constraint
 #     tau_max::Float64

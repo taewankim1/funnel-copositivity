@@ -9,6 +9,7 @@ mutable struct Unicycle <: Dynamics
     ir::Int
     ip::Int
     idelta::Int
+    ilam::Int
     Co::Array{Float64,2}
     Do::Array{Float64,2}
     Eo::Array{Float64,2}
@@ -25,20 +26,25 @@ mutable struct Unicycle <: Dynamics
         ix = 3
         iu = 2
         iw = 2
-        iq = 3
+        iq = 6
         iphi = 2
-        ir = ix + iu + iw + iq
-        ip = ix + iphi
-        idelta = 2
+        ir = 2 + 2 + 2 + iq
+        ip = 6 + iphi
+        idelta = 6 # What is this for?
+        @assert iq == idelta
+        ilam =  idelta + iphi # will be initialized later.
 
-        Co = [0 0 1; 0 0 0; 0 0 0]
-        Do = [0 0; 1 0; 0 0]
+        Co1 = [0 0 1; 0 0 0; 0 0 0]
+        Do1 = [0 0; 1 0; 0 0]
+        Go1 = [0 0; 0 0; 1 0]
+        Co = [Co1;Co1]
+        Do = [Do1;Do1]
+        Go = [Go1;Go1]
         Eo = [1 0; 0 1; 0 0]
-        Go = [0 0; 0 0; 1 0]
 
         c1 = 0.03
         c2 = 0.05
-        new(ix, iu, iw, iq, iphi, ir, ip, idelta, Co, Do, Eo, Go, c1, c2)
+        new(ix, iu, iw, iq, iphi, ir, ip, idelta, ilam, Co, Do, Eo, Go, c1, c2)
     end
 end
 
@@ -128,179 +134,210 @@ function diff_ABF(model::Unicycle, x::Vector, u::Vector)
     return fx, fu, fw
 end
 
-
-mutable struct QuadrotorDynamics <: Dynamics
-    ix::Int
-    iu::Int
-    iϕ::Int
-    iv::Int
-    Cv::Array{Float64,2}
-    Dvu::Array{Float64,2}
-    Go::Union{Vector,Matrix}
-    β::Vector{Float64}
+mutable struct Rocket <: Dynamics
+    ix::Int64
+    iu::Int64
+    iw::Int64
 
     m::Float64
+    J_x::Float64
+    J_y::Float64
+    J_z::Float64
+
+    r_t::Float64
     g::Float64
-    Jx::Float64
-    Jy::Float64
-    Jz::Float64
-    function QuadrotorDynamics()
-        ix = 12
-        iu = 4
 
-        iϕ = 9
-        iv = 7
-        Go = zeros(ix, iϕ)
-        Go[4:end, 1:end] = Matrix(1.0I, iϕ, iϕ)
-        Cv = zeros(iv, ix)
-        Cv[1, 7] = 1.0
-        Cv[2, 8] = 1.0
-        Cv[3, 9] = 1.0
-        Cv[4, 10] = 1.0
-        Cv[5, 11] = 1.0
-        Cv[6, 12] = 1.0
-        Dvu = zeros(iv, iu)
-        Dvu[7, 1] = 1.0
-        β = zeros(iϕ)
+    # Selector matrices.
+    iq::Int
+    iq_list::Array{Int64}
+    iphi::Int
+    ir::Int
+    ip::Int
+    idelta::Int
+    ilam::Int
+    Co::Array{Float64,2}
+    Do::Array{Float64,2}
+    Eo::Array{Float64,2}
 
-        m = 1.325
-        Jx = 0.03843
-        Jy = 0.02719
-        Jz = 0.060528
-        g = 9.81
-        new(ix, iu, iϕ, iv, Cv, Dvu, Go, β, m, g, Jx, Jy, Jz)
+    # Lipschitz and Lsmooth contants.
+    gamma::Array{Float64,3}
+    beta::Vector{Float64}
+
+    # Will be initialized later.
+    C::Array{Float64,2}
+    D::Array{Float64,2}
+    E::Array{Float64,2}
+    function Rocket()
+        m0 = 2
+        J_x = 0.29292
+        J_y = 0.29292
+        J_z = 0.0025
+
+        r_t = 0.25
+        g = 1.625
+
+        iphi = 8
+        iv = 9
+
+        iq_list = [6 6 5 4 3 4 2 2 2]
+        C1 = [zeros(6,6) [Matrix(1.0I,3,3);zeros(3,3)] zeros(6,3)]
+        D1 = [zeros(3,6); Matrix(1.0I,3,3) zeros(3,3)]
+        C2 = copy(C1)
+        D2 = copy(D1)
+        C3 = [zeros(5,6) [Matrix(1.0I,2,3);zeros(3,3)] zeros(5,3)]
+        D3 = [zeros(2,6); Matrix(1.0I,3,3) zeros(3,3)]
+        C4 = [zeros(4,6) [1 0 0 0 0 0;0 1 0 0 0 0; 0 0 0 1 0 0; 0 0 0 0 1 0]]
+        D4 = zeros(4,6)
+        C5 = [zeros(3,6) [1 0 0 0 0 0;0 0 0 1 0 0; 0 0 0 0 1 0]]
+        D5 = zeros(3,6)
+        C6 = copy(C4)
+        D6 = copy(D4)
+        C7 = [zeros(2,9) [0 1 0;0 0 1]]
+        D7 = zeros(2,6)
+        C8 = [zeros(2,9) [1 0 0;0 0 1]]
+        D8 = zeros(2,6)
+        C9 = [zeros(2,9) [1 0 0;0 1 0]]
+        D9 = zeros(2,6)
+        Co = [C1;C2;C3;C4;C5;C6;C7;C8;C9]
+        Do = [D1;D2;D3;D4;D5;D6;D7;D8;D9]
+        Eo = [zeros(3,9);Matrix(1.0I,9,9)] 
+
+        # Here, we consider Nonlinearity and approximation error simultaneosuly.
+        # Hence, 'iq' and 'iphi' are set to zeros.
+        iq = 0
+        iphi = size(Eo,2)
+        idelta = size(Eo,2)
+        ir = 
+        ip = 2 * iphi
+        ilam = iphi + idelta
+
+        new(12,6,0,m0,J_x,J_y,J_z,r_t,g,iq,iq_list,iphi,ir,ip,idelta,ilam,Co,Do,Eo)
     end
 end
 
-function forward(model::QuadrotorDynamics, x::Vector, u::Vector)
-    # rx = x[1]
-    # ry = x[2]
-    # rz = x[3]
+function forward(model::Rocket,x::Vector,u::Vector)
+    rx = x[1]
+    ry = x[2]
+    rz = x[3]
     vx = x[4]
     vy = x[5]
     vz = x[6]
-
     phi = x[7]
     theta = x[8]
     psi = x[9]
-
     p = x[10]
     q = x[11]
     r = x[12]
 
-    Fz = u[1]
-    Mx = u[2]
-    My = u[3]
-    Mz = u[4]
+    Fx = u[1]
+    Fy = u[2]
+    Fz = u[3]
+    Tx = u[4]
+    Ty = u[5]
+    Tz = u[6]
 
+    # alpha_m = model.alpha_ME
+    # alpha_r = model.alpha_RCS
     m = model.m
+    J_x = model.J_x
+    J_y = model.J_y
+    J_z = model.J_z
+
+    r_t = model.r_t
     g = model.g
-    J_x = model.Jx
-    J_y = model.Jy
-    J_z = model.Jz
 
     f = zeros(size(x))
     f[1] = vx
     f[2] = vy
     f[3] = vz
-    f[4] = Fz * (sin(phi) * sin(psi) + sin(theta) * cos(phi) * cos(psi)) / m
-    f[5] = Fz * (-sin(phi) * cos(psi) + sin(psi) * sin(theta) * cos(phi)) / m
-    f[6] = Fz * cos(phi) * cos(theta) / m - g
-    f[7] = p + q * sin(phi) * tan(theta) + r * cos(phi) * tan(theta)
-    f[8] = q * cos(phi) - r * sin(phi)
-    f[9] = q * sin(phi) / cos(theta) + r * cos(phi) / cos(theta)
-    f[10] = (J_y * q * r - J_z * q * r + Mx) / J_x
-    f[11] = (-J_x * p * r + J_z * p * r + My) / J_y
-    f[12] = (J_x * p * q - J_y * p * q + Mz) / J_z
+    f[4] = Fx*cos(psi)*cos(theta)/m + Fy*(sin(phi)*sin(theta)*cos(psi) - sin(psi)*cos(phi))/m + Fz*(sin(phi)*sin(psi) + sin(theta)*cos(phi)*cos(psi))/m
+    f[5] = Fx*sin(psi)*cos(theta)/m + Fy*(sin(phi)*sin(psi)*sin(theta) + cos(phi)*cos(psi))/m + Fz*(-sin(phi)*cos(psi) + sin(psi)*sin(theta)*cos(phi))/m
+    f[6] = -Fx*sin(theta)/m + Fy*sin(phi)*cos(theta)/m + Fz*cos(phi)*cos(theta)/m - g
+    f[7] = p + q*sin(phi)*tan(theta) + r*cos(phi)*tan(theta)
+    f[8] = q*cos(phi) - r*sin(phi)
+    f[9] = q*sin(phi)/cos(theta) + r*cos(phi)/cos(theta)
+    f[10] = (Fy*r_t + J_y*q*r - J_z*q*r + Tx)/J_x
+    f[11] = (-Fx*r_t - J_x*p*r + J_z*p*r + Ty)/J_y
+    f[12] = (J_x*p*q - J_y*p*q + Tz)/J_z
     return f
 end
 
-mutable struct QuadrotorDynamicsNED <: Dynamics
-    ix::Int
-    iu::Int
-    # iϕ::Int
-    # iv::Int
-    # iψ::Int
-    # iμ::Int
-    # Cv::Array{Float64,2}
-    # Dvu::Array{Float64,2}
-    # G::Union{Vector,Matrix}
-    # Cμ::Array{Float64,2}
-    # Dμu::Array{Float64,2}
-    # β::Vector{Float64}
-
-    m::Float64
-    g::Float64
-    Jx::Float64
-    Jy::Float64
-    Jz::Float64
-    function QuadrotorDynamicsNED()
-        ix = 12
-        iu = 4
-        # iϕ = 6
-        # iv = 7
-
-        # iψ = iϕ
-        # iμ = iv
-
-        # Go = [0 0 0;0 0 0;0 0 0;1 0 0;0 1 0;0 0 1]
-        # Cv = Matrix(1.0I,ix,ix)
-        # Dvu = zeros(iu,iu)
-
-        # G = Go
-        # Cμ = Cv
-        # Dμu = Dvu
-
-        # β = zeros(iψ)
-
-        m = 1.0
-        Jx = 1.0
-        Jy = 1.0
-        Jz = 1.0
-        g = 9.81
-        new(ix, iu, m, g, Jx, Jy, Jz)
-    end
-end
-
-function forward(model::QuadrotorDynamicsNED, x::Vector, u::Vector)
-    # rx = x[1]
-    # ry = x[2]
-    # rz = x[3]
+function diff(model::Rocket, x::Vector, u::Vector)
+    rx = x[1]
+    ry = x[2]
+    rz = x[3]
     vx = x[4]
     vy = x[5]
     vz = x[6]
-
     phi = x[7]
     theta = x[8]
     psi = x[9]
-
     p = x[10]
     q = x[11]
     r = x[12]
 
-    Fz = u[1]
-    Mx = u[2]
-    My = u[3]
-    Mz = u[4]
+    Fx = u[1]
+    Fy = u[2]
+    Fz = u[3]
+    Tx = u[4]
+    Ty = u[5]
+    Tz = u[6]
 
+    # alpha_m = model.alpha_ME
+    # alpha_r = model.alpha_RCS
     m = model.m
-    g = model.g
-    J_x = model.Jx
-    J_y = model.Jy
-    J_z = model.Jz
+    J_x = model.J_x
+    J_y = model.J_y
+    J_z = model.J_z
 
-    f = zeros(size(x))
-    f[1] = vx
-    f[2] = vy
-    f[3] = vz
-    f[4] = -Fz * (sin(phi) * sin(psi) + sin(theta) * cos(phi) * cos(psi)) / m
-    f[5] = -Fz * (-sin(phi) * cos(psi) + sin(psi) * sin(theta) * cos(phi)) / m
-    f[6] = -Fz * cos(phi) * cos(theta) / m + g
-    f[7] = p + q * sin(phi) * tan(theta) + r * cos(phi) * tan(theta)
-    f[8] = q * cos(phi) - r * sin(phi)
-    f[9] = q * sin(phi) / cos(theta) + r * cos(phi) / cos(theta)
-    f[10] = (J_y * q * r - J_z * q * r + Mx) / J_x
-    f[11] = (-J_x * p * r + J_z * p * r + My) / J_y
-    f[12] = (J_x * p * q - J_y * p * q + Mz) / J_z
-    return f
+    r_t = model.r_t
+    g = model.g
+
+    fx = zeros(model.ix,model.ix)
+    fx[1,4] = 1
+    fx[2,5] = 1
+    fx[3,6] = 1
+    fx[4,7] = Fy*(sin(phi)*sin(psi) + sin(theta)*cos(phi)*cos(psi))/m + Fz*(-sin(phi)*sin(theta)*cos(psi) + sin(psi)*cos(phi))/m
+    fx[4,8] = -Fx*sin(theta)*cos(psi)/m + Fy*sin(phi)*cos(psi)*cos(theta)/m + Fz*cos(phi)*cos(psi)*cos(theta)/m
+    fx[4,9] = -Fx*sin(psi)*cos(theta)/m + Fy*(-sin(phi)*sin(psi)*sin(theta) - cos(phi)*cos(psi))/m + Fz*(sin(phi)*cos(psi) - sin(psi)*sin(theta)*cos(phi))/m
+    fx[5,7] = Fy*(-sin(phi)*cos(psi) + sin(psi)*sin(theta)*cos(phi))/m + Fz*(-sin(phi)*sin(psi)*sin(theta) - cos(phi)*cos(psi))/m
+    fx[5,8] = -Fx*sin(psi)*sin(theta)/m + Fy*sin(phi)*sin(psi)*cos(theta)/m + Fz*sin(psi)*cos(phi)*cos(theta)/m
+    fx[5,9] = Fx*cos(psi)*cos(theta)/m + Fy*(sin(phi)*sin(theta)*cos(psi) - sin(psi)*cos(phi))/m + Fz*(sin(phi)*sin(psi) + sin(theta)*cos(phi)*cos(psi))/m
+    fx[6,7] = Fy*cos(phi)*cos(theta)/m - Fz*sin(phi)*cos(theta)/m
+    fx[6,8] = -Fx*cos(theta)/m - Fy*sin(phi)*sin(theta)/m - Fz*sin(theta)*cos(phi)/m
+    fx[7,7] = q*cos(phi)*tan(theta) - r*sin(phi)*tan(theta)
+    fx[7,8] = q*(tan(theta)^2 + 1)*sin(phi) + r*(tan(theta)^2 + 1)*cos(phi)
+    fx[7,10] = 1
+    fx[7,11] = sin(phi)*tan(theta)
+    fx[7,12] = cos(phi)*tan(theta)
+    fx[8,7] = -q*sin(phi) - r*cos(phi)
+    fx[8,11] = cos(phi)
+    fx[8,12] = -sin(phi)
+    fx[9,7] = q*cos(phi)/cos(theta) - r*sin(phi)/cos(theta)
+    fx[9,8] = q*sin(phi)*sin(theta)/cos(theta)^2 + r*sin(theta)*cos(phi)/cos(theta)^2
+    fx[9,11] = sin(phi)/cos(theta)
+    fx[9,12] = cos(phi)/cos(theta)
+    fx[10,11] = (J_y*r - J_z*r)/J_x
+    fx[10,12] = (J_y*q - J_z*q)/J_x
+    fx[11,10] = (-J_x*r + J_z*r)/J_y
+    fx[11,12] = (-J_x*p + J_z*p)/J_y
+    fx[12,10] = (J_x*q - J_y*q)/J_z
+    fx[12,11] = (J_x*p - J_y*p)/J_z
+
+    fu = zeros(model.ix,model.iu)
+    fu[4,1] = cos(psi)*cos(theta)/m
+    fu[4,2] = (sin(phi)*sin(theta)*cos(psi) - sin(psi)*cos(phi))/m
+    fu[4,3] = (sin(phi)*sin(psi) + sin(theta)*cos(phi)*cos(psi))/m
+    fu[5,1] = sin(psi)*cos(theta)/m
+    fu[5,2] = (sin(phi)*sin(psi)*sin(theta) + cos(phi)*cos(psi))/m
+    fu[5,3] = (-sin(phi)*cos(psi) + sin(psi)*sin(theta)*cos(phi))/m
+    fu[6,1] = -sin(theta)/m
+    fu[6,2] = sin(phi)*cos(theta)/m
+    fu[6,3] = cos(phi)*cos(theta)/m
+    fu[10,2] = r_t/J_x
+    fu[10,4] = 1/J_x
+    fu[11,1] = -r_t/J_y
+    fu[11,5] = 1/J_y
+    fu[12,6] = 1/J_z
+    return fx, fu
 end

@@ -187,10 +187,9 @@ function Lipschitz_estimation_around_traj(N::Int,num_sample::Int,
     dynamics::Dynamics,Qnode::Array{Float64,3},Rnode::Array{Float64,3})
     iphi = dynamics.iphi
     gamma_sample = zeros(num_sample,iphi,N+1)
-
     for idx in 1:N+1
         for j in 1:num_sample
-            # Set the seed for reproducibility
+            # Set the seed for reproducibility.
             Random.seed!((N+1)*(idx-1)+j)
 
             sqrt_Q = sqrt(Qnode[:,:,idx])
@@ -293,6 +292,7 @@ function Lipschitz_estimation_around_traj_with_feedback(N::Int,num_sample::Int,
     return maximum(gamma_sample,dims=1)[:]
 end
 
+
 function propagate_from_funnel_entry_uncertain_dynamics(x0::Vector,dynamics::Dynamics,
     xnom::Matrix,unom::Matrix,tnom::Vector,
     Q::Array{Float64,3},Y::Array{Float64,3})
@@ -344,6 +344,85 @@ function propagate_from_funnel_entry_uncertain_dynamics(x0::Vector,dynamics::Dyn
 
 
         prob = ODEProblem(dvdt,V0,(tnom[i],tnom[i+1]),(w_sample,))
+        sol = solve(prob, Tsit5(), reltol=1e-9, abstol=1e-9;verbose=false);
+
+        tode = sol.t
+        ode = stack(sol.u)
+        xode = ode[idx_x,:]
+        xnomode = ode[idx_xnom,:]
+        uode = zeros(iu,size(tode,1))
+        for idx in 1:length(tode)
+            t_ = tode[idx]
+            x_ = xode[:,idx]
+
+            xnom_ = xnomode[:,idx]
+            unom_ = get_u_interp(t_,u_fit)
+
+            Q_ = get_ABF_interp(t_,Q_fit,ix,ix)
+            Y_ = get_ABF_interp(t_,Y_fit,iu,ix)
+            K_ = Y_ * inv(Q_)
+
+            uode[:,idx] .= unom_ + K_ * (x_ - xnom_)
+        end
+        if i == 1
+            tprop = tode
+            xprop = xode
+            uprop = uode
+            xnomprop = xnomode
+        else 
+            tprop = vcat(tprop,tode)
+            xprop = hcat(xprop,xode)
+            uprop = hcat(uprop,uode)
+            xnomprop = hcat(xnomprop,xnomode)
+        end
+        xfwd[:,i+1] = xode[:,end]
+    end
+    return xfwd,tprop,xprop,uprop,xnomprop
+end
+
+function propagate_from_funnel_entry(x0::Vector,dynamics::Dynamics,
+    xnom::Matrix,unom::Matrix,tnom::Vector,
+    Q::Array{Float64,3},Y::Array{Float64,3})
+    N = size(xnom,2) - 1
+    ix = dynamics.ix
+    iu = dynamics.iu
+
+    idx_x = 1:ix
+    idx_xnom = ix+1:2*ix
+    function dvdt(out,V,p,t)
+        unom_ = get_u_interp(t,u_fit)
+        Q_ = get_ABF_interp(t,Q_fit,ix,ix)
+        Y_ = get_ABF_interp(t,Y_fit,iu,ix)
+
+        x_ = V[idx_x]
+        xnom_ = V[idx_xnom]
+        K_ = Y_ * inv(Q_)
+
+        u_ = unom_ + K_ * (x_ - xnom_)
+
+        # traj terms
+        f = forward(dynamics,x_,u_)
+        fnom = forward(dynamics,xnom_,unom_)
+
+        dV = [f;fnom]
+        out .= dV[:]
+    end
+
+    xfwd = zeros(size(xnom))
+    xfwd[:,1] .= x0
+    tprop = []
+    xprop = []
+    uprop = []
+    xnomprop = []
+
+    for i = 1:N
+        V0 = [xfwd[:,i];xnom[:,i]][:]
+        um = unom[:,i]
+        up = unom[:,i+1]
+        # dt = Tnom[i]
+
+
+        prob = ODEProblem(dvdt,V0,(tnom[i],tnom[i+1]),(nothing,))
         sol = solve(prob, Tsit5(), reltol=1e-9, abstol=1e-9;verbose=false);
 
         tode = sol.t

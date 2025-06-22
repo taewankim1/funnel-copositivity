@@ -25,11 +25,11 @@ mutable struct FunnelSolution
 
     lambda_w::Float64
     t::Vector{Float64}
-    function FunnelSolution(N::Int64,ix::Int64,iu::Int64,lambda_w::Float64)
+    function FunnelSolution(N::Int64,ix::Int64,iu::Int64,ilam::Int64,lambda_w::Float64)
         Q = zeros(ix,ix,N+1)
         # K = zeros(iu,ix,N+1)
         Y = zeros(iu,ix,N+1)
-        lam = zeros(2,N+1)
+        lam = zeros(ilam,N+1)
         gamma = ones(N)
         beta = ones(N)
 
@@ -57,12 +57,23 @@ struct FunnelSynthesis
         verbosity::Bool=true,flag_copositivity_type::Int=1) where T <: FunnelConstraint
         ix = dynamics.ix
         iu = dynamics.iu
-        solution = FunnelSolution(N,ix,iu,lambda_w)
+        ilam = dynamics.ilam
+        solution = FunnelSolution(N,ix,iu,ilam,lambda_w)
         new(dynamics,funl_constraint,scaling,solution,N,flag_copositivity_type,verbosity)
     end
 end
 
-function stack_LMI(LMI11,LMI21,LMI31,LMI41,
+function stack_LMI33(LMI11,LMI21,LMI31,
+                    LMI22,LMI32,
+                            LMI33)
+    row1 = [LMI11 LMI21' LMI31']
+    row2 = [LMI21 LMI22 LMI32']
+    row3 = [LMI31 LMI32 LMI33]
+    LMI = [row1;row2;row3]
+    return LMI
+end
+
+function stack_LMI44(LMI11,LMI21,LMI31,LMI41,
                     LMI22,LMI32,LMI42,
                             LMI33,LMI43,
                                 LMI44)
@@ -89,8 +100,8 @@ function state_input_constraints!(fs,model::Model,Qi,Yi,xnom,unom,idx)
     end
 end
 
-function sdpopt!(fs::FunnelSynthesis,xnom::Matrix,unom::Matrix,tnom::Vector,
-    Qmax::Array{Float64,3},Rmax::Array{Float64,3},solver::String)
+function sdpopt!(fs::FunnelSynthesis,xnom::Matrix,unom::Matrix,tnom::Vector,solver::String,
+    Qmax::Union{Array{Float64,3},Nothing},Rmax::Union{Array{Float64,3},Nothing})
 
     N = fs.N
     ix = fs.dynamics.ix
@@ -102,6 +113,7 @@ function sdpopt!(fs::FunnelSynthesis,xnom::Matrix,unom::Matrix,tnom::Vector,
     ip = fs.dynamics.ip
     iH = ix+ip+iw+ir
     idelta = fs.dynamics.idelta
+    ilam = fs.dynamics.ilam
 
     Sx = fs.scaling.Sx
     iSx = fs.scaling.iSx
@@ -116,6 +128,8 @@ function sdpopt!(fs::FunnelSynthesis,xnom::Matrix,unom::Matrix,tnom::Vector,
         model = Model(Mosek.Optimizer)
         set_optimizer_attribute(model, "MSK_IPAR_LOG", fs.verbosity) # verbosity for Mosek
         # set_optimizer_attribute(model, "MSK_IPAR_INTPNT_SCALING", Mosek.MSK_ON)
+        # set_optimizer_attribute(model, "MSK_IPAR_PRESOLVE_USE", 0)
+        # set_optimizer_attribute(model, "MSK_IPAR_INTPNT_SCALING", 2)
         # set_optimizer_attribute(model, "MSK_DPAR_INTPNT_TOL_PFEAS", 1e-6)
         # set_optimizer_attribute(model, "MSK_DPAR_INTPNT_TOL_DFEAS", 1e-6)
         # set_optimizer_attribute(model, "MSK_DPAR_INTPNT_TOL_REL_GAP", 1e-7)
@@ -123,6 +137,8 @@ function sdpopt!(fs::FunnelSynthesis,xnom::Matrix,unom::Matrix,tnom::Vector,
         # set_optimizer_attribute(model, "MSK_IPAR_LOG", 10)
         # set_optimizer_attribute(model, "MSK_DPAR_INTPNT_CO_TOL_MU_RED", 1e-3)
         # set_optimizer_attribute(model, "MSK_DPAR_OPTIMIZER_MAX_TIME", 600.0)
+        println("MOSEK version via MOI = ",
+            MOI.get(model, MOI.SolverVersion()))
     elseif solver == "Clarabel"
         model = Model(Clarabel.Optimizer)
         set_optimizer_attribute(model, "verbose", true) # verbosity for Mosek
@@ -137,7 +153,7 @@ function sdpopt!(fs::FunnelSynthesis,xnom::Matrix,unom::Matrix,tnom::Vector,
         push!(Qcvx, @variable(model, [1:ix, 1:ix], PSD))
         push!(Ycvx, @variable(model, [1:iu, 1:ix]))
     end
-    @variable(model, lamcvx[1:2,1:N+1] .>= 0)
+    @variable(model, lamcvx[1:ilam,1:N+1] .>= 0)
     if fs.flag_copositivity_type == 2
         X11 = []
         X21 = []
@@ -160,16 +176,40 @@ function sdpopt!(fs::FunnelSynthesis,xnom::Matrix,unom::Matrix,tnom::Vector,
     end
 
     function get_N1(lam::Vector)::Matrix
-        N11 = [lam[1]*1.0I(ir-iq) zeros(ir-iq,iq)]
-        N22 = [zeros(iq,ir-iq) lam[2]*1.0I(iq)]
-        N1 = [N11;N22]
+        if typeof(fs.dynamics) == Unicycle
+            N1_11 = [diagm(lam[1:idelta])*1.0I(idelta) zeros(idelta,iq)]
+            n = Int(iq ÷ 2)
+            a = lam[idelta+1] * Matrix{Float64}(I, n, n)
+            b = lam[idelta+2] * Matrix{Float64}(I, n, n)
+            N1_22 = [zeros(n, idelta)  a  zeros(n, n);
+                zeros(n, idelta)  zeros(n, n)  b]
+        elseif typeof(fs.dynamics) == Rocket
+            len_iq_list = length(fs.dynamics.iq_list)
+            fs.dynamics.iq_list[1]
+            N1_11_beta = diagm([lam[i] for i in 1:length(dynamics.iq_list) for j in 1:dynamics.iq_list[i]])
+            N1_11_gamma = diagm([lam[i+iphi] for i in 1:length(dynamics.iq_list) for j in 1:dynamics.iq_list[i]])
+            N1_11 = [N1_11_beta zeros(iq,iq)]
+            N1_22 = [zeros(iq,iq) N1_11_gamma]
+        else
+            # Do something else for other types.
+            error("get_N1 not implemented for type " * string(typeof(fs.dynamics)))
+        end
+        N1 = [N1_11;N1_22]
         return N1
     end
 
     function get_N2(lam::Vector,gamma_sq::Any,beta_sq::Any)::Matrix
-        N11 = [lam[1]*beta_sq*1.0I(idelta) zeros(idelta,iphi)]
-        N22 = [zeros(iphi,idelta) lam[2]*gamma_sq*1.0I(iphi)]
-        N2 = [N11;N22]
+        if typeof(fs.dynamics) == Unicycle
+            N2_11 = [diagm(lam[1:idelta])*beta_sq*1.0I(idelta) zeros(idelta,iphi)]
+            N2_22 = [zeros(iphi,idelta) diagm(lam[idelta+1:idelta+iphi])*gamma_sq*1.0I(iphi)]
+        elseif typeof(fs.dynamics) == Rocket
+            N2_11 = [diagm(lam[1:idelta])*beta_sq*1.0I(idelta) zeros(idelta,iphi)]
+            N2_22 = [zeros(iphi,idelta) diagm(lam[idelta+1:idelta+iphi])*gamma_sq*1.0I(iphi)]
+        else
+            # Do something else for other types.
+            error("get_N1 not implemented for type " * string(typeof(fs.dynamics)))
+        end
+        N2 = [N2_11;N2_22]
         return N2
     end
 
@@ -182,18 +222,28 @@ function sdpopt!(fs::FunnelSynthesis,xnom::Matrix,unom::Matrix,tnom::Vector,
         
         LMI11 = Wij + Wji - 2*dQ
         LMI21 = (get_N2(lami,gamma_sq,beta_sq) + get_N2(lamj,gamma_sq,beta_sq)) * fs.dynamics.E'
-        LMI31 = Fi' + Fj'
-        LMI41 = Li + Lj
         LMI22 = - (get_N2(lami,gamma_sq,beta_sq)+get_N2(lamj,gamma_sq,beta_sq))
-        LMI32 = zeros(iw,ip)
-        LMI42 = zeros(ir,ip)
-        LMI33 = -2*lambda_w * 1.0I(iw)
-        LMI43 = 2*fs.dynamics.G
-        LMI44 = - (get_N1(lami) + get_N1(lamj))
-        H_ij = - 1/2 * stack_LMI(LMI11,LMI21,LMI31,LMI41,
-                                        LMI22,LMI32,LMI42,
-                                        LMI33,LMI43,
-                                        LMI44)
+        if iw == 0
+            LMI41 = Li + Lj
+            LMI42 = zeros(ir,ip)
+            LMI44 = - (get_N1(lami) + get_N1(lamj))
+            H_ij = - 1/2 * stack_LMI33(LMI11,LMI21,LMI41,
+                                            LMI22,LMI42,
+                                            LMI44,
+                                            )
+        else
+            LMI31 = Fi' + Fj'
+            LMI41 = Li + Lj
+            LMI32 = zeros(iw,ip)
+            LMI42 = zeros(ir,ip)
+            LMI33 = -2*lambda_w * 1.0I(iw)
+            LMI43 = 2*fs.dynamics.G
+            LMI44 = - (get_N1(lami) + get_N1(lamj))
+            H_ij = - 1/2 * stack_LMI44(LMI11,LMI21,LMI31,LMI41,
+                                            LMI22,LMI32,LMI42,
+                                            LMI33,LMI43,
+                                            LMI44)
+        end
         return H_ij
     end
 
@@ -203,14 +253,24 @@ function sdpopt!(fs::FunnelSynthesis,xnom::Matrix,unom::Matrix,tnom::Vector,
         lami = Slam * lamcvx[:,i]
         xi = xnom[:,i]
         ui = unom[:,i]
-        Ai,Bi,Fi = diff_ABF(fs.dynamics,xi,ui)
+        if iw == 0
+            Ai,Bi = diff(fs.dynamics,xi,ui)
+            Fi = nothing
+        else
+            Ai,Bi,Fi = diff_ABF(fs.dynamics,xi,ui)
+        end
         if i <= N
             Qj = Sx*Qcvx[i+1]*Sx
             Yj = Su*Ycvx[i+1]*Sx
             lamj = Slam * lamcvx[:,i+1]
             xj = xnom[:,i+1]
             uj = unom[:,i+1]
-            Aj,Bj,Fj = diff_ABF(fs.dynamics,xj,uj)
+            if iw == 0
+                Aj,Bj = diff(fs.dynamics,xj,uj)
+                Fj = nothing
+            else
+                Aj,Bj,Fj = diff_ABF(fs.dynamics,xj,uj)
+            end
             delt = tnom[i+1] - tnom[i]
             dQ = (Qj-Qi) / delt
             gamma_sq = fs.solution.gamma[i]^2
@@ -219,7 +279,12 @@ function sdpopt!(fs::FunnelSynthesis,xnom::Matrix,unom::Matrix,tnom::Vector,
             H_ii = get_H(Qi,Qi,Yi,Yi,lami,lami,Ai,Ai,Bi,Bi,Fi,Fi,dQ,gamma_sq,beta_sq)
             H_ij = get_H(Qi,Qj,Yi,Yj,lami,lamj,Ai,Aj,Bi,Bj,Fi,Fj,dQ,gamma_sq,beta_sq)
             H_jj = get_H(Qj,Qj,Yj,Yj,lamj,lamj,Aj,Aj,Bj,Bj,Fj,Fj,dQ,gamma_sq,beta_sq)
-            if fs.flag_copositivity_type == 1
+            if fs.flag_copositivity_type == 0
+                @constraint(model,H_ii >= 0, PSDCone())
+                # if i == N
+                @constraint(model,H_jj >= 0, PSDCone())
+                # end
+            elseif fs.flag_copositivity_type == 1
                 @constraint(model,H_ii >= 0, PSDCone())
                 @constraint(model,H_ij >= 0, PSDCone())
                 @constraint(model,H_jj >= 0, PSDCone())
@@ -240,8 +305,12 @@ function sdpopt!(fs::FunnelSynthesis,xnom::Matrix,unom::Matrix,tnom::Vector,
         state_input_constraints!(fs,model,Qi,Yi,xi,ui,i)
 
         # constraints on Qmax and Rmax
-        @constraint(model, Qi <= Qmax[:,:,i], PSDCone())
-        @constraint(model, [Qi Yi';Yi Rmax[:,:,i]] >= 0, PSDCone())
+        if Qmax !== nothing
+            @constraint(model, Qi <= Qmax[:,:,i], PSDCone())
+        end
+        if Rmax !== nothing
+            @constraint(model, [Qi Yi';Yi Rmax[:,:,i]] >= 0, PSDCone())
+        end
     end
 
     # cost
@@ -263,8 +332,10 @@ function run!(fs::FunnelSynthesis,
         # Qi::Matrix,Qf::Matrix,
         gamma::Vector,beta::Vector,
         xnom::Matrix,unom::Matrix,tnom::Vector,
-        Qmax::Array{Float64,3},Rmax::Array{Float64,3},
-        solver::String)
+        solver::String,
+        Qmax::Union{Array{Float64,3}, Nothing}=nothing,
+        Rmax::Union{Array{Float64,3}, Nothing}=nothing
+        )
     # fs.solution.Qi .= Qi 
     # fs.solution.Qf .= Qf
 
@@ -272,7 +343,7 @@ function run!(fs::FunnelSynthesis,
     fs.solution.beta = beta
 
     # solve subproblem
-    c_all,solve_time = sdpopt!(fs,xnom,unom,tnom,Qmax,Rmax,solver)
+    c_all,solve_time = sdpopt!(fs,xnom,unom,tnom,solver,Qmax,Rmax)
     return c_all,solve_time
 
     # # propagate

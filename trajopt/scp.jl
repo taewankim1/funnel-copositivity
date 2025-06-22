@@ -107,11 +107,11 @@ function uniform_fixed!(ptr::SCP,model::Model)
     S_sigma = ptr.scaling.S_sigma 
     dt = [ptr.tf/N/S_sigma for i in 1:N]
     i = 1
-    # min_dt = ptr.scaling.min_dt
-    # max_dt = ptr.scaling.max_dt
-    # @constraint(model,S_sigma*dt[i] >= 0)
-    # @constraint(model,S_sigma*dt[i] >= min_dt)
-    # @constraint(model,S_sigma*dt[i] <= max_dt)
+    min_dt = ptr.scaling.min_dt
+    max_dt = ptr.scaling.max_dt
+    @constraint(model,S_sigma*dt[i] >= 0)
+    @constraint(model,S_sigma*dt[i] >= min_dt)
+    @constraint(model,S_sigma*dt[i] <= max_dt)
     return dt
 end
 
@@ -277,9 +277,6 @@ function cvxopt(ptr::PTR,solver::Any,solver_env::Any)
         end
     end
 
-    # # Hard coding (intermediate waypoint)
-    @constraint(model, (Sx*xcvx[:,2]+sx)[1:2] == [4;8])
-
     # Dynamics
     for i in 1:N
         @constraint(model,xcvx[:,i+1] == iSx*ptr.solution.A[:,:,i]*(Sx*xcvx[:,i] + sx)
@@ -316,14 +313,16 @@ function cvxopt(ptr::PTR,solver::Any,solver_env::Any)
 
     @objective(model, Min, l_normalize)
     optimize!(model)
-    # @assert is_solved_and_feasible(model)
+    status = JuMP.termination_status(model)
+    solver_success = (status == MOI.OPTIMAL || status == MOI.LOCALLY_SOLVED)
+
 
     for i in 1:N+1
         ptr.solution.x[:,i] .= Sx*value.(xcvx[:,i]) + sx
         ptr.solution.u[:,i] .= Su*value.(ucvx[:,i]) + su
     end
     ptr.solution.dt .= S_sigma*value.(dt)
-    return value(l_tf),value(l_rate),value(l_vc),value(l_tr),value(l_c),value(l_all)
+    return solver_success,value(l_tf),value(l_rate),value(l_vc),value(l_tr),value(l_c),value(l_all)
 end
 
 function run(ptr::SCP,x0::Matrix,u0::Matrix,dt0::Vector,xi::Vector,xf::Vector,solver::String)
@@ -344,13 +343,14 @@ function run(ptr::SCP,x0::Matrix,u0::Matrix,dt0::Vector,xi::Vector,xf::Vector,so
         solver_env = nothing
     end
 
+    solver_success = false
     for iteration in 1:ptr.max_iter
         # discretization & linearization
         ptr.solution.A,ptr.solution.Bm,ptr.solution.Bp,ptr.solution.smat,ptr.solution.z,_ = discretize_foh(ptr.dynamics,
             ptr.solution.x[:,1:N],ptr.solution.u,ptr.solution.dt)
         
         # solve subproblem
-        c_tf,c_rate,c_vc,c_tr,c_input,c_all = cvxopt(ptr,solver,solver_env);
+        solver_success,c_tf,c_rate,c_vc,c_tr,c_input,c_all = cvxopt(ptr,solver,solver_env);
 
         # multiple shooting
         xfwd,ptr.solution.tprop,ptr.solution.xprop = propagate_multiple_FOH(ptr.dynamics,ptr.solution.x,ptr.solution.u,ptr.solution.dt)
@@ -368,23 +368,28 @@ function run(ptr::SCP,x0::Matrix,u0::Matrix,dt0::Vector,xi::Vector,xf::Vector,so
             println("+-------+------------+-----------+-----------+-----------+---------+---------+----------+----------+")
         end
         # println(c_vc,"/",c_tr,"/",dyn_error)
-        @printf("|%-2d     |%-7.2f     |%-7.3f   |%-7.3f    |%-7.3f    |%-5.3f    |%-5.1f    | %-5.1f    |%-5.1e   |\n",
-            iteration,
-            c_all,c_tf,c_input,c_rate,
-            -1,
-            log10(abs(c_vc)), log10(abs(c_tr)), log10(abs(dyn_error)))
+        if ptr.verbosity
+            @printf("|%-2d     |%-7.2f     |%-7.3f   |%-7.3f    |%-7.3f    |%-5.3f    |%-5.1f    | %-5.1f    |%-5.1e   |\n",
+                iteration,
+                c_all,c_tf,c_input,c_rate,
+                -1,
+                log10(abs(c_vc)), log10(abs(c_tr)), log10(abs(dyn_error)))
+        end
 
         flag_vc::Bool = c_vc < ptr.tol_vc
         flag_tr::Bool = c_tr < ptr.tol_tr
         flag_dyn::Bool = dyn_error < ptr.tol_dyn
 
         if flag_vc && flag_tr && flag_dyn
-            println("+--------------------------------------------------------------------------------------------------+")
-            println("Converged!")
+            if ptr.verbosity
+                println("+--------------------------------------------------------------------------------------------------+")
+                println("Converged!")
+            end
             break
         end
     end
     update_t(ptr.solution)
+    return solver_success
 end
 
 

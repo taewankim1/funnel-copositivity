@@ -41,6 +41,36 @@ function impose!(constraint::InputConstraint,model::Model,Q::Matrix,Y::Matrix,xn
     @constraint(model, 0 <= LMI, PSDCone())
 end
 
+struct GlideSlope <: FunnelConstraint
+    margin::Float64
+    gamma::Float64
+    function GlideSlope(margin::Float64,gamma::Float64)
+        new(margin,gamma)
+    end
+end
+
+function impose!(constraint::GlideSlope,model::Model,Q::Any,Y::Matrix,xnom::Vector,unom::Vector;idx::Int)
+    margin = constraint.margin
+    gamma = constraint.gamma
+
+    # ||Ax||_2 <= c^T x + margin.
+    A = [1.0 zeros(1,11);
+         0.0 1.0 zeros(1,10);]
+    c = zeros(12,1)
+    c[3] = 1.0 / tan(gamma)
+
+    # Linearization to a' * x <= b.
+    # a = (xnom' * A' * A) / norm(A*xnom) - c'
+    a = (A'*A*xnom) - c
+    b = [margin / tan(gamma)]
+
+    # Imposing a' * x <= b to the funnel.
+    LMI = [(b-a'*xnom).*(b-a'*xnom) a'*Q;
+        Q*a Q
+    ]
+    @constraint(model, 0 <= LMI, PSDCone())
+end
+
 struct ObstacleAvoidance <: FunnelConstraint
     H::Matrix
     c::Vector
