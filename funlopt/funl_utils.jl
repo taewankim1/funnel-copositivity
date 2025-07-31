@@ -55,6 +55,14 @@ function get_u_interp(t::Float64,u_fit)
     return ans
 end
 
+function get_vec_interp(t::Float64,vec_fit,nv)
+    ans = zeros(nv)
+    for i in 1:nv
+        ans[i] = vec_fit[i](t)
+    end
+    return ans
+end
+
 function get_ABF_interp(t::Float64,Q_fit,n,m)::Array{Float64,2}
     new_Q_matrix = Array{Float64}(undef, n, m)
     for i in 1:n

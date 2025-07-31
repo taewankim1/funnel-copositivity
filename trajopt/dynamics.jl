@@ -148,6 +148,7 @@ mutable struct Rocket <: Dynamics
     g::Float64
 
     # Selector matrices.
+    type_channel::Int64
     iq::Int
     iq_list::Array{Int64}
     iphi::Int
@@ -158,6 +159,7 @@ mutable struct Rocket <: Dynamics
     Co::Array{Float64,2}
     Do::Array{Float64,2}
     Eo::Array{Float64,2}
+    
 
     # Lipschitz and Lsmooth contants.
     gamma::Array{Float64,3}
@@ -167,7 +169,7 @@ mutable struct Rocket <: Dynamics
     C::Array{Float64,2}
     D::Array{Float64,2}
     E::Array{Float64,2}
-    function Rocket()
+    function Rocket(;type_channel::Int64=1)
         m0 = 2
         J_x = 0.29292
         J_y = 0.29292
@@ -176,42 +178,57 @@ mutable struct Rocket <: Dynamics
         r_t = 0.25
         g = 1.625
 
-        iphi = 8
-        iv = 9
-
-        iq_list = [6 6 5 4 3 4 2 2 2]
-        C1 = [zeros(6,6) [Matrix(1.0I,3,3);zeros(3,3)] zeros(6,3)]
-        D1 = [zeros(3,6); Matrix(1.0I,3,3) zeros(3,3)]
-        C2 = copy(C1)
-        D2 = copy(D1)
-        C3 = [zeros(5,6) [Matrix(1.0I,2,3);zeros(3,3)] zeros(5,3)]
-        D3 = [zeros(2,6); Matrix(1.0I,3,3) zeros(3,3)]
-        C4 = [zeros(4,6) [1 0 0 0 0 0;0 1 0 0 0 0; 0 0 0 1 0 0; 0 0 0 0 1 0]]
-        D4 = zeros(4,6)
-        C5 = [zeros(3,6) [1 0 0 0 0 0;0 0 0 1 0 0; 0 0 0 0 1 0]]
-        D5 = zeros(3,6)
-        C6 = copy(C4)
-        D6 = copy(D4)
-        C7 = [zeros(2,9) [0 1 0;0 0 1]]
-        D7 = zeros(2,6)
-        C8 = [zeros(2,9) [1 0 0;0 0 1]]
-        D8 = zeros(2,6)
-        C9 = [zeros(2,9) [1 0 0;0 1 0]]
-        D9 = zeros(2,6)
-        Co = [C1;C2;C3;C4;C5;C6;C7;C8;C9]
-        Do = [D1;D2;D3;D4;D5;D6;D7;D8;D9]
-        Eo = [zeros(3,9);Matrix(1.0I,9,9)] 
-
-        # Here, we consider Nonlinearity and approximation error simultaneosuly.
-        # Hence, 'iq' and 'iphi' are set to zeros.
+        # Here, we consider nonlinearity and approximation error simultaneosuly.
+        # That is, considering large enough beta can cover uncertainty for the incremental system,
+        # caused by nonlinearity. Hence, 'iq' and 'iphi' are set to zeros.
         iq = 0
-        iphi = size(Eo,2)
-        idelta = size(Eo,2)
-        ir = 
-        ip = 2 * iphi
-        ilam = iphi + idelta
+        iphi = 0
 
-        new(12,6,0,m0,J_x,J_y,J_z,r_t,g,iq,iq_list,iphi,ir,ip,idelta,ilam,Co,Do,Eo)
+        if type_channel == 1
+            iq_list = [6 6 5 4 3 4 2 2 2]
+            C1 = [zeros(6,6) [Matrix(1.0I,3,3);zeros(3,3)] zeros(6,3)]
+            D1 = [zeros(3,6); Matrix(1.0I,3,3) zeros(3,3)]
+            C2 = copy(C1)
+            D2 = copy(D1)
+            C3 = [zeros(5,6) [Matrix(1.0I,2,3);zeros(3,3)] zeros(5,3)]
+            D3 = [zeros(2,6); Matrix(1.0I,3,3) zeros(3,3)]
+            C4 = [zeros(4,6) [1 0 0 0 0 0;0 1 0 0 0 0; 0 0 0 1 0 0; 0 0 0 0 1 0]]
+            D4 = zeros(4,6)
+            C5 = [zeros(3,6) [1 0 0 0 0 0;0 0 0 1 0 0; 0 0 0 0 1 0]]
+            D5 = zeros(3,6)
+            C6 = copy(C4)
+            D6 = copy(D4)
+            C7 = [zeros(2,9) [0 1 0;0 0 1]]
+            D7 = zeros(2,6)
+            C8 = [zeros(2,9) [1 0 0;0 0 1]]
+            D8 = zeros(2,6)
+            C9 = [zeros(2,9) [1 0 0;0 1 0]]
+            D9 = zeros(2,6)
+            Co = [C1;C2;C3;C4;C5;C6;C7;C8;C9]
+            Do = [D1;D2;D3;D4;D5;D6;D7;D8;D9]
+            Eo = [zeros(3,9);Matrix(1.0I,9,9)] 
+            idelta = size(Eo,2)
+            ir = size(Co,1)
+            ip = idelta
+            ilam = ip
+        elseif type_channel == 2
+            iq_list = [6 4 3]
+            C1 = [zeros(6,6) [Matrix(1.0I,3,3);zeros(3,3)] zeros(6,3)]
+            D1 = [zeros(3,6); Matrix(1.0I,3,3) zeros(3,3)]
+            C2 = [zeros(4,6) [1 0 0 0 0 0;0 1 0 0 0 0; 0 0 0 1 0 0; 0 0 0 0 1 0]]
+            D2 = zeros(4,6)
+            C3 = [zeros(3,9) [1 0 0;0 1 0;0 0 1]]
+            D3 = zeros(3,6)
+            Co = [C1;C2;C3]
+            Do = [D1;D2;D3]
+            Eo = [zeros(3,9);Matrix(1.0I,9,9)] 
+            idelta = 3
+            ir = size(Co,1)
+            ip = size(Eo,2)
+            ilam = 3
+        end
+
+        new(12,6,0,m0,J_x,J_y,J_z,r_t,g,type_channel,iq,iq_list,iphi,ir,ip,idelta,ilam,Co,Do,Eo)
     end
 end
 

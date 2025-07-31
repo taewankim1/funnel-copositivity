@@ -137,8 +137,8 @@ function sdpopt!(fs::FunnelSynthesis,xnom::Matrix,unom::Matrix,tnom::Vector,solv
         # set_optimizer_attribute(model, "MSK_IPAR_LOG", 10)
         # set_optimizer_attribute(model, "MSK_DPAR_INTPNT_CO_TOL_MU_RED", 1e-3)
         # set_optimizer_attribute(model, "MSK_DPAR_OPTIMIZER_MAX_TIME", 600.0)
-        println("MOSEK version via MOI = ",
-            MOI.get(model, MOI.SolverVersion()))
+        # println("MOSEK version via MOI = ",
+        #     MOI.get(model, MOI.SolverVersion()))
     elseif solver == "Clarabel"
         model = Model(Clarabel.Optimizer)
         set_optimizer_attribute(model, "verbose", true) # verbosity for Mosek
@@ -183,18 +183,20 @@ function sdpopt!(fs::FunnelSynthesis,xnom::Matrix,unom::Matrix,tnom::Vector,solv
             b = lam[idelta+2] * Matrix{Float64}(I, n, n)
             N1_22 = [zeros(n, idelta)  a  zeros(n, n);
                 zeros(n, idelta)  zeros(n, n)  b]
+            N1 = [N1_11;N1_22]
         elseif typeof(fs.dynamics) == Rocket
-            len_iq_list = length(fs.dynamics.iq_list)
-            fs.dynamics.iq_list[1]
-            N1_11_beta = diagm([lam[i] for i in 1:length(dynamics.iq_list) for j in 1:dynamics.iq_list[i]])
-            N1_11_gamma = diagm([lam[i+iphi] for i in 1:length(dynamics.iq_list) for j in 1:dynamics.iq_list[i]])
-            N1_11 = [N1_11_beta zeros(iq,iq)]
-            N1_22 = [zeros(iq,iq) N1_11_gamma]
+            if fs.dynamics.type_channel == 1
+                N1 = diagm([lam[i] for i in 1:length(dynamics.iq_list) for j in 1:dynamics.iq_list[i]])
+            elseif fs.dynamics.type_channel == 2
+                N1 = diagm([lam[i] for i in 1:length(dynamics.iq_list) for j in 1:dynamics.iq_list[i]])
+            else
+                error("The given type_channel not implemented" * string(typeof(fs.dynamics.type_channel)))
+            end
         else
             # Do something else for other types.
+            N1 = nothing
             error("get_N1 not implemented for type " * string(typeof(fs.dynamics)))
         end
-        N1 = [N1_11;N1_22]
         return N1
     end
 
@@ -202,14 +204,21 @@ function sdpopt!(fs::FunnelSynthesis,xnom::Matrix,unom::Matrix,tnom::Vector,solv
         if typeof(fs.dynamics) == Unicycle
             N2_11 = [diagm(lam[1:idelta])*beta_sq*1.0I(idelta) zeros(idelta,iphi)]
             N2_22 = [zeros(iphi,idelta) diagm(lam[idelta+1:idelta+iphi])*gamma_sq*1.0I(iphi)]
+            N2 = [N2_11;N2_22]
         elseif typeof(fs.dynamics) == Rocket
-            N2_11 = [diagm(lam[1:idelta])*beta_sq*1.0I(idelta) zeros(idelta,iphi)]
-            N2_22 = [zeros(iphi,idelta) diagm(lam[idelta+1:idelta+iphi])*gamma_sq*1.0I(iphi)]
+            if fs.dynamics.type_channel == 1
+                N2 = diagm(lam[1:idelta])*beta_sq*1.0I(idelta)
+            elseif fs.dynamics.type_channel == 2
+                ip_list = [3 3 3]
+                N2 = diagm([lam[i] * beta_sq[i,i] for i in 1:length(ip_list) for j in 1:ip_list[i]])
+            else
+                error("The given type_channel not implemented" * string(typeof(fs.dynamics.type_channel)))
+            end
         else
             # Do something else for other types.
+            N2 = nothing
             error("get_N1 not implemented for type " * string(typeof(fs.dynamics)))
         end
-        N2 = [N2_11;N2_22]
         return N2
     end
 
@@ -279,23 +288,45 @@ function sdpopt!(fs::FunnelSynthesis,xnom::Matrix,unom::Matrix,tnom::Vector,solv
             H_ii = get_H(Qi,Qi,Yi,Yi,lami,lami,Ai,Ai,Bi,Bi,Fi,Fi,dQ,gamma_sq,beta_sq)
             H_ij = get_H(Qi,Qj,Yi,Yj,lami,lamj,Ai,Aj,Bi,Bj,Fi,Fj,dQ,gamma_sq,beta_sq)
             H_jj = get_H(Qj,Qj,Yj,Yj,lamj,lamj,Aj,Aj,Bj,Bj,Fj,Fj,dQ,gamma_sq,beta_sq)
-            if fs.flag_copositivity_type == 0
+            if fs.flag_copositivity_type == -1
                 @constraint(model,H_ii >= 0, PSDCone())
                 # if i == N
-                @constraint(model,H_jj >= 0, PSDCone())
+                #     @constraint(model,H_jj >= 0, PSDCone())
                 # end
+            elseif fs.flag_copositivity_type == 0
+                @constraint(model,H_ii >= 0, PSDCone())
+                @constraint(model,H_jj >= 0, PSDCone())
             elseif fs.flag_copositivity_type == 1
                 @constraint(model,H_ii >= 0, PSDCone())
                 @constraint(model,H_ij >= 0, PSDCone())
                 @constraint(model,H_jj >= 0, PSDCone())
             elseif fs.flag_copositivity_type == 2
                 LMI11 = H_ii - X11[i]
-                LMI21 = H_ij - X21[i]
+                LMI21 = 0.5 * (H_ij + H_ij') - X21[i]
                 LMI22 = H_jj - X22[i]
-
                 LMI = [LMI11 LMI21';LMI21 LMI22]
-
                 @constraint(model,LMI >= 0, PSDCone())
+            elseif fs.flag_copositivity_type == 3
+                @constraint(model,H_ii >= 0, PSDCone())
+                @constraint(model,H_jj >= 0, PSDCone())
+
+                @constraint(model,H_ii + H_ij >= 0, PSDCone())
+                @constraint(model,H_jj + H_ij >= 0, PSDCone())
+            elseif fs.flag_copositivity_type == 4
+                @constraint(model,H_ii >= 0, PSDCone())
+                @constraint(model,H_jj >= 0, PSDCone())
+
+                @constraint(model,2*H_ii + H_ij >= 0, PSDCone())
+                @constraint(model,H_ii + H_jj + 2*H_ij >= 0, PSDCone())
+                @constraint(model,2*H_jj + H_ij >= 0, PSDCone())
+            elseif fs.flag_copositivity_type == 5
+                @constraint(model,H_ii >= 0, PSDCone())
+                @constraint(model,H_jj >= 0, PSDCone())
+
+                @constraint(model,3*H_ii + H_ij >= 0, PSDCone())
+                @constraint(model,3*H_jj + H_ij >= 0, PSDCone())
+                @constraint(model,3*H_ii + H_jj + 3*H_ij >= 0, PSDCone())
+                @constraint(model,H_ii + 3*H_jj + 3*H_ij >= 0, PSDCone())
             else
                 error("Copositivity type must be 1 or 2")
             end
